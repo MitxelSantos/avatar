@@ -1,0 +1,114 @@
+# Avatar Pipeline - Sistema Profesional de Entrenamiento LoRA
+# Dependencias completas para procesamiento facial, metadata MJ y entrenamiento SDXL
+
+# ===== CORE DEPENDENCIES =====
+# Python 3.8 - 3.11 required
+
+# Deep Learning Framework
+torch>=2.0.0,<2.2.0
+torchvision>=0.15.0
+torchaudio>=2.0.0
+--extra-index-url https://download.pytorch.org/whl/cu118
+
+# Face Detection and Computer Vision
+mtcnn>=0.1.1
+opencv-python>=4.8.0
+tensorflow>=2.10.0,<2.14.0
+
+# Image Processing
+Pillow>=9.0.0
+numpy>=1.21.0
+scikit-image>=0.19.0
+
+# ===== DIFFUSION AND LoRA TRAINING =====
+# Diffusers ecosystem
+diffusers[torch]>=0.21.0
+transformers>=4.25.1
+accelerate>=0.15.0
+safetensors>=0.3.0
+
+# Memory optimization
+xformers>=0.0.20
+bitsandbytes>=0.37.0
+
+# ===== OPTIMIZERS AND TRAINING =====
+# Advanced optimizers
+dadaptation>=3.1
+prodigyopt>=1.0
+lion-pytorch>=0.0.6
+
+# Training utilities
+tensorboard>=2.10.0
+wandb>=0.13.0
+omegaconf>=2.3.0
+
+# ===== DATA PROCESSING =====
+# Data analysis and manipulation
+pandas>=1.5.0
+datasets>=2.8.0
+
+# ===== UTILITIES =====
+# File and path handling
+pathlib2>=2.3.7; python_version < "3.4"
+tqdm>=4.64.0
+rich>=12.0.0
+
+# Configuration and serialization
+pyyaml>=6.0
+toml>=0.10.2
+jsonschema>=4.0.0
+
+# ===== UI AND INTERACTION =====
+# GUI for file dialogs
+tkinter-page>=0.0.1; sys_platform == "win32"
+
+# ===== DEVELOPMENT AND TESTING =====
+# Code quality (optional)
+pytest>=7.0.0
+black>=22.0.0
+flake8>=5.0.0
+isort>=5.10.0
+
+# ===== PLATFORM-SPECIFIC =====
+# Windows specific
+pywin32>=304; sys_platform == "win32"
+colorama>=0.4.4; sys_platform == "win32"
+
+# ===== KOHYA_SS DEPENDENCIES =====
+# Will be installed automatically during setup
+# git+https://github.com/kohya-ss/sd-scripts.git
+
+# ===== OPTIONAL PERFORMANCE =====
+# ONNX for optimized inference (optional)
+onnx>=1.12.0
+onnxruntime>=1.13.0
+
+# Triton for optimized kernels (Linux only)
+triton>=2.0.0; sys_platform == "linux"
+
+# ===== VERSION CONSTRAINTS =====
+# Ensure compatibility
+setuptools>=65.0.0
+wheel>=0.37.0
+pip>=22.0.0
+
+# ===== NOTES =====
+# 1. Install in this order:
+#    pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu118
+#    pip install -r requirements.txt
+#
+# 2. For CUDA 12.1, change index URL to:
+#    https://download.pytorch.org/whl/cu121
+#
+# 3. For CPU-only (not recommended):
+#    pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cpu
+#
+# 4. Minimum hardware requirements:
+#    - GPU: RTX 3050 6GB (RTX 3060 8GB+ recommended)
+#    - RAM: 16GB (32GB recommended)
+#    - Storage: 50GB free space
+#
+# 5. Tested on:
+#    - Windows 10/11
+#    - Ubuntu 20.04/22.04
+#    - Python 3.8, 3.9, 3.10, 3.11

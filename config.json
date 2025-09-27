@@ -1,0 +1,51 @@
+{
+  "paths": {
+    "raw_mj": "./clients/CLIENT_ID/raw_mj",
+    "raw_nikon": "./clients/CLIENT_ID/raw_real",
+    "crops_1024": "./clients/CLIENT_ID/processed",
+    "selected_for_lora": "./clients/CLIENT_ID/dataset_lora",
+    "rejected": "./clients/CLIENT_ID/rejected",
+    "metadata": "./clients/CLIENT_ID/metadata"
+  },
+  "processing": {
+    "target_size": 1024,
+    "face_confidence_threshold": 0.85,
+    "face_padding_factor": 1.6,
+    "supported_formats": [
+      ".png",
+      ".jpg",
+      ".jpeg",
+      ".tiff",
+      ".tif"
+    ],
+    "output_format": "PNG",
+    "output_quality": 95
+  },
+  "quality_control": {
+    "min_file_size_kb": 200,
+    "max_file_size_mb": 5,
+    "min_brightness": 40,
+    "max_brightness": 220,
+    "min_contrast": 25,
+    "blur_threshold": 100
+  },
+  "lora_training": {
+    "min_images_for_training": 50,
+    "recommended_steps_per_image": 30,
+    "max_training_steps": 3000,
+    "default_batch_size": 2,
+    "learning_rate": 0.0001
+  },
+  "validated_results": {
+    "test_date": "2025-09-25",
+    "total_processed": 152,
+    "successful": 141,
+    "success_rate": "92.8%",
+    "rejected_reasons": [
+      "Blurry (score: <100)"
+    ],
+    "face_confidence_typical": 1.0,
+    "dataset_ready": true,
+    "notes": "Optimal configuration validated with real MJ dataset"
+  }
+}

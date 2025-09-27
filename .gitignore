@@ -1,0 +1,23 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+
+# Project specific
+temp/
+*.log
+*.tmp
+
+# Large files
+*.safetensors
+*.ckpt
+*.png
+*.jpg
+*.jpeg
+*.tiff
+
+# OS
+.DS_Store
+Thumbs.db

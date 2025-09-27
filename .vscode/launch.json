@@ -1,0 +1,88 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Process All Images",
+            "type": "python",
+            "request": "launch",
+            "program": "${workspaceFolder}/main.py",
+            "args": [
+                "--source",
+                "all"
+            ],
+            "console": "integratedTerminal",
+            "cwd": "${workspaceFolder}",
+            "justMyCode": false
+        },
+        {
+            "name": "Process Only MidJourney",
+            "type": "python",
+            "request": "launch",
+            "program": "${workspaceFolder}/main.py",
+            "args": [
+                "--source",
+                "mj"
+            ],
+            "console": "integratedTerminal",
+            "cwd": "${workspaceFolder}",
+            "justMyCode": false
+        },
+        {
+            "name": "Process Only Nikon",
+            "type": "python",
+            "request": "launch",
+            "program": "${workspaceFolder}/main.py",
+            "args": [
+                "--source",
+                "nikon"
+            ],
+            "console": "integratedTerminal",
+            "cwd": "${workspaceFolder}",
+            "justMyCode": false
+        },
+        {
+            "name": "Debug MJ Sample",
+            "type": "python",
+            "request": "launch",
+            "program": "${workspaceFolder}/debug_single.py",
+            "args": [
+                "--mj"
+            ],
+            "console": "integratedTerminal",
+            "cwd": "${workspaceFolder}",
+            "justMyCode": false
+        },
+        {
+            "name": "Debug Nikon Sample",
+            "type": "python",
+            "request": "launch",
+            "program": "${workspaceFolder}/debug_single.py",
+            "args": [
+                "--nikon"
+            ],
+            "console": "integratedTerminal",
+            "cwd": "${workspaceFolder}",
+            "justMyCode": false
+        },
+        {
+            "name": "Test Single Image",
+            "type": "python",
+            "request": "launch",
+            "program": "${workspaceFolder}/debug_single.py",
+            "args": [
+                "${input:imagePath}"
+            ],
+            "console": "integratedTerminal",
+            "cwd": "${workspaceFolder}",
+            "justMyCode": false
+        }
+    ],
+    "inputs": [
+        {
+            "id": "imagePath",
+            "description": "Enter path to image file",
+            "default": "./dataset_brujo_catemaco/raw_mj/",
+            "type": "promptString"
+        }
+    ]
+}
