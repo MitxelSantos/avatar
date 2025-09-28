@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-data_preprocessor.py - HOTFIX VERSION
-CORRIGE: Parámetros incompatibles de rawpy.postprocess()
+data_preprocessor.py - Preprocesamiento avanzado con distribución inteligente
+Versión 3.0 - Distribución 90% MJ / 10% Real automática, soporte RAW mejorado
 """
 
 import os
@@ -11,7 +11,18 @@ import shutil
 from pathlib import Path
 from datetime import datetime
 from collections import defaultdict, Counter
+from typing import Dict, List, Optional, Any, Tuple
 import pandas as pd
+
+# Imports locales
+from config import CONFIG
+from utils import (
+    PipelineLogger,
+    ProgressTracker,
+    safe_copy_file,
+    load_json_safe,
+    save_json_safe,
+)
 
 # Soporte para archivos RAW
 try:
@@ -19,14 +30,18 @@ try:
     import imageio
 
     RAW_SUPPORT = True
-    print("✅ rawpy disponible - Soporte completo para archivos RAW")
 except ImportError:
     RAW_SUPPORT = False
-    print("⚠️ rawpy no disponible - Instala con: pip install rawpy imageio")
 
 
 class DataPreprocessor:
-    def __init__(self):
+    """Preprocesador de datos con distribución inteligente y soporte RAW completo"""
+
+    def __init__(self, config=None):
+        self.config = config or CONFIG
+        self.logger = PipelineLogger("DataPreprocessor", self.config.logs_dir)
+
+        # Parámetros de MidJourney que se extraen automáticamente
         self.mj_parameters = [
             "seed",
             "version",
@@ -40,27 +55,393 @@ class DataPreprocessor:
             "weirdness",
         ]
 
-        # Extensiones soportadas
-        self.supported_extensions = {
-            "standard": [".png", ".jpg", ".jpeg", ".tiff", ".tif"],
-            "raw": [".nef", ".cr2", ".arw", ".dng", ".raf", ".orf", ".rw2", ".pef"],
+        # Estadísticas de procesamiento
+        self.stats = {
+            "mj_imported": 0,
+            "real_imported": 0,
+            "raw_conversions": 0,
+            "metadata_extracted": 0,
         }
 
-    def get_image_files(self, source_dir):
-        """
-        Obtiene archivos de imagen evitando duplicados y soportando RAW
-        FIX: Elimina el bug de detección duplicada de archivos .NEF
-        """
-        source_path = Path(source_dir)
+    def process_mj_images(
+        self, client_id: str, source_dir: str, clients_dir: Path
+    ) -> bool:
+        """Procesa imágenes MJ con captura completa de metadata"""
+        client_path = clients_dir / client_id
+        raw_mj_dir = client_path / "raw_mj"
+        metadata_dir = client_path / "metadata"
 
-        # Combinar todas las extensiones soportadas
-        all_extensions = (
-            self.supported_extensions["standard"] + self.supported_extensions["raw"]
+        # Crear directorios
+        raw_mj_dir.mkdir(parents=True, exist_ok=True)
+        metadata_dir.mkdir(parents=True, exist_ok=True)
+
+        self.logger.info(f"Procesando imágenes MidJourney para cliente: {client_id}")
+        self.logger.info(f"Origen: {source_dir}")
+        self.logger.info(f"Destino: {raw_mj_dir}")
+
+        # Obtener archivos de imagen (SIN DUPLICADOS)
+        image_files = self._get_image_files(source_dir)
+
+        if not image_files:
+            self.logger.error(f"No se encontraron imágenes en {source_dir}")
+            return False
+
+        self.logger.info(f"Encontradas {len(image_files)} imágenes únicas")
+
+        # Agrupar por UUID (grupos de 4 variaciones)
+        image_groups = self._group_mj_images_by_uuid(image_files)
+        self.logger.info(f"Detectados {len(image_groups)} grupos de imágenes")
+
+        # Capturar prompt maestro para el cliente
+        client_config = self._load_client_config(client_path)
+        if not client_config.get("prompt_maestro"):
+            prompt_maestro = self._capture_master_prompt()
+            client_config["prompt_maestro"] = prompt_maestro
+            self._save_client_config(client_path, client_config)
+            self.logger.info("Prompt maestro guardado")
+
+        # Capturar prompts específicos por grupo
+        group_prompts = self._capture_group_prompts(image_groups)
+
+        # Procesar y organizar imágenes con tracker de progreso
+        metadata_mapping = {}
+        tracker = ProgressTracker(len(image_files), "Importando imágenes MJ")
+
+        copied_count = 0
+        for group_uuid, group_files in image_groups.items():
+            group_prompt = group_prompts.get(group_uuid, "")
+
+            for i, image_file in enumerate(group_files):
+                # Extraer metadata completa del filename
+                mj_metadata = self._extract_complete_mj_metadata(
+                    image_file.name, group_prompt, client_config.get("omni_weight", 160)
+                )
+
+                # Generar nuevo nombre preservando información
+                new_name = self._generate_mj_filename(client_id, mj_metadata, i + 1)
+
+                # Copiar archivo
+                src = image_file
+                dst = raw_mj_dir / new_name
+
+                if safe_copy_file(src, dst, self.logger):
+                    # Guardar metadata mapping
+                    metadata_mapping[new_name] = mj_metadata
+                    copied_count += 1
+                    self.stats["mj_imported"] += 1
+
+                tracker.update(status=f"Procesada: {new_name}")
+
+        tracker.finish("Importación MJ completada")
+
+        # Guardar metadata mapping completa
+        mapping_file = metadata_dir / "mj_metadata_mapping.json"
+        save_json_safe(metadata_mapping, mapping_file, self.logger)
+
+        # Guardar análisis de prompts
+        prompts_analysis = self._analyze_prompt_patterns(metadata_mapping)
+        analysis_file = metadata_dir / "mj_prompts_analysis.json"
+        save_json_safe(prompts_analysis, analysis_file, self.logger)
+
+        self.logger.info(f"Importación MJ completada:")
+        self.logger.info(f"  Imágenes importadas: {copied_count}")
+        self.logger.info(f"  Grupos procesados: {len(image_groups)}")
+        self.logger.info(f"  Metadata guardada: {mapping_file}")
+
+        return True
+
+    def process_real_images(
+        self, client_id: str, source_dir: str, clients_dir: Path
+    ) -> bool:
+        """
+        Procesa fotos reales con soporte completo para RAW
+        """
+        client_path = clients_dir / client_id
+        raw_real_dir = client_path / "raw_real"
+        metadata_dir = client_path / "metadata"
+        temp_dir = client_path / "temp_raw_conversion"
+
+        # Crear directorios
+        raw_real_dir.mkdir(parents=True, exist_ok=True)
+        metadata_dir.mkdir(parents=True, exist_ok=True)
+
+        self.logger.info(
+            f"Procesando fotos reales con soporte RAW para cliente: {client_id}"
+        )
+        self.logger.info(f"Origen: {source_dir}")
+        self.logger.info(f"Destino: {raw_real_dir}")
+
+        # Obtener archivos de imagen (SIN DUPLICADOS)
+        image_files = self._get_image_files(source_dir)
+
+        if not image_files:
+            self.logger.error(f"No se encontraron imágenes soportadas en {source_dir}")
+            return False
+
+        # Procesar y analizar cada imagen con progreso
+        metadata_mapping = {}
+        tracker = ProgressTracker(len(image_files), "Procesando fotos reales")
+
+        copied_count = 0
+        converted_count = 0
+
+        for i, image_file in enumerate(image_files, 1):
+            # Verificar si es archivo RAW
+            is_raw = image_file.suffix.lower() in [
+                ext.lower() for ext in self.config.supported_extensions["raw"]
+            ]
+
+            if is_raw and RAW_SUPPORT:
+                self.logger.debug(f"Archivo RAW detectado: {image_file.suffix.upper()}")
+
+                # Convertir RAW a JPEG temporal
+                temp_jpeg = self._convert_raw_to_temp_jpeg(image_file, temp_dir)
+                if temp_jpeg is None:
+                    tracker.update(status=f"Error: {image_file.name}")
+                    continue
+
+                converted_count += 1
+                self.stats["raw_conversions"] += 1
+            elif is_raw and not RAW_SUPPORT:
+                self.logger.warning(
+                    f"Archivo RAW encontrado pero rawpy no disponible: {image_file.name}"
+                )
+                tracker.update(status=f"Saltado RAW: {image_file.name}")
+                continue
+
+            # Análisis automático de características
+            real_metadata = self._analyze_real_image(image_file, i, is_raw=is_raw)
+
+            # Generar nuevo nombre preservando info de origen
+            new_name = self._generate_real_filename(
+                client_id, real_metadata, i, is_raw=is_raw
+            )
+
+            # Copiar archivo original al destino
+            dst = raw_real_dir / new_name
+            if safe_copy_file(image_file, dst, self.logger):
+                # Guardar metadata con información de conversión si aplica
+                if is_raw and converted_count > 0:
+                    real_metadata["temp_conversion_path"] = str(
+                        temp_dir / f"temp_{image_file.stem}.jpg"
+                    )
+
+                real_metadata["final_path"] = str(dst)
+                metadata_mapping[new_name] = real_metadata
+                copied_count += 1
+                self.stats["real_imported"] += 1
+
+            tracker.update(status=f"Procesada: {new_name}")
+
+        tracker.finish("Procesamiento fotos reales completado")
+
+        # Guardar metadata mapping
+        mapping_file = metadata_dir / "real_metadata_mapping.json"
+        save_json_safe(metadata_mapping, mapping_file, self.logger)
+
+        # Generar análisis de fotos reales
+        real_analysis = self._analyze_real_photos_patterns(metadata_mapping)
+        real_analysis["conversion_stats"] = {
+            "total_processed": copied_count,
+            "raw_conversions": converted_count,
+            "standard_files": copied_count - converted_count,
+        }
+
+        analysis_file = metadata_dir / "real_photos_analysis.json"
+        save_json_safe(real_analysis, analysis_file, self.logger)
+
+        self.logger.info(f"Importación fotos reales completada:")
+        self.logger.info(f"  Imágenes procesadas: {copied_count}")
+        self.logger.info(f"  Conversiones RAW: {converted_count}")
+        self.logger.info(f"  Archivos estándar: {copied_count - converted_count}")
+
+        return True
+
+    def prepare_lora_dataset(self, client_id: str, clients_dir: Path) -> bool:
+        """
+        Prepara dataset final para LoRA con distribución inteligente:
+        - Normal (ambas): 90% MJ / 10% Real
+        - Solo MJ: 100% MJ
+        - Avatar real: 70% Real / 30% MJ
+        """
+        client_path = clients_dir / client_id
+        processed_dir = client_path / "processed"
+        dataset_dir = client_path / "dataset_lora"
+        metadata_dir = client_path / "metadata"
+
+        self.logger.info(
+            f"Preparando dataset LoRA con distribución inteligente para: {client_id}"
         )
 
-        print(f"🔍 Buscando archivos con extensiones: {all_extensions}")
+        if not processed_dir.exists():
+            self.logger.error(
+                "No hay imágenes procesadas. Ejecuta primero el procesamiento facial."
+            )
+            return False
 
-        # BÚSQUEDA SIN DUPLICADOS - usando resolución de paths
+        # Obtener imágenes procesadas por tipo
+        processed_images = list(processed_dir.glob("*.png"))
+
+        if not processed_images:
+            self.logger.error("No hay imágenes procesadas disponibles")
+            return False
+
+        # Separar por tipo (MJ vs Real)
+        mj_images = [img for img in processed_images if "_mj_" in img.name]
+        real_images = [img for img in processed_images if "_real_" in img.name]
+
+        self.logger.info(f"Imágenes disponibles:")
+        self.logger.info(f"  MJ: {len(mj_images)}")
+        self.logger.info(f"  Real: {len(real_images)}")
+        self.logger.info(f"  Total: {len(processed_images)}")
+
+        # Determinar tipo de avatar y distribución usando configuración
+        avatar_type, distribution = self._determine_avatar_type_and_distribution(
+            len(mj_images), len(real_images)
+        )
+
+        self.logger.info(f"Análisis de distribución:")
+        self.logger.info(f"  Tipo de avatar: {avatar_type}")
+        self.logger.info(f"  Distribución objetivo: {distribution['description']}")
+
+        # Calcular cantidades según distribución
+        total_available = len(mj_images) + len(real_images)
+
+        if total_available < 30:
+            self.logger.warning(
+                f"Pocas imágenes disponibles ({total_available}). Recomendado mínimo: 50"
+            )
+
+        # Calcular distribución
+        target_mj_count, target_real_count = self._calculate_distribution(
+            len(mj_images), len(real_images), distribution, total_available
+        )
+
+        # Ajustar si no hay suficientes de algún tipo
+        actual_mj_count = min(len(mj_images), target_mj_count)
+        actual_real_count = min(len(real_images), target_real_count)
+
+        self.logger.info(f"Distribución final:")
+        self.logger.info(
+            f"  MJ seleccionadas: {actual_mj_count} ({actual_mj_count/(actual_mj_count+actual_real_count)*100:.1f}%)"
+        )
+        self.logger.info(
+            f"  Real seleccionadas: {actual_real_count} ({actual_real_count/(actual_mj_count+actual_real_count)*100:.1f}%)"
+        )
+
+        # Seleccionar mejores imágenes
+        selected_mj = self._select_best_images(mj_images, actual_mj_count)
+        selected_real = self._select_best_images(real_images, actual_real_count)
+
+        # Crear directorio de dataset
+        dataset_dir.mkdir(parents=True, exist_ok=True)
+
+        # Configurar pesos según tipo de avatar
+        weights = self._get_weights_for_avatar_type(avatar_type)
+
+        # Procesar con tracker de progreso
+        dataset_metadata = {}
+        total_to_process = len(selected_mj) + len(selected_real)
+        tracker = ProgressTracker(total_to_process, "Preparando dataset LoRA")
+
+        # Copiar imágenes MJ
+        for i, img_path in enumerate(selected_mj, 1):
+            dst_name = f"{client_id}_mj_{i:03d}.png"
+            dst_path = dataset_dir / dst_name
+
+            if safe_copy_file(img_path, dst_path, self.logger):
+                # Generar caption rico para MJ
+                caption = self._generate_mj_caption(client_id, img_path, metadata_dir)
+                caption_file = dataset_dir / f"{client_id}_mj_{i:03d}.txt"
+
+                try:
+                    with open(caption_file, "w", encoding="utf-8") as f:
+                        f.write(caption)
+
+                    dataset_metadata[dst_name] = {
+                        "type": "mj",
+                        "weight": weights["mj_weight"],
+                        "caption": caption,
+                        "original_path": str(img_path),
+                    }
+                except Exception as e:
+                    self.logger.error(f"Error escribiendo caption {caption_file}: {e}")
+
+            tracker.update(status=f"MJ: {dst_name}")
+
+        # Copiar imágenes reales
+        for i, img_path in enumerate(selected_real, 1):
+            dst_name = f"{client_id}_real_{i:03d}.png"
+            dst_path = dataset_dir / dst_name
+
+            if safe_copy_file(img_path, dst_path, self.logger):
+                # Generar caption para fotos reales
+                caption = self._generate_real_caption(client_id, img_path, metadata_dir)
+                caption_file = dataset_dir / f"{client_id}_real_{i:03d}.txt"
+
+                try:
+                    with open(caption_file, "w", encoding="utf-8") as f:
+                        f.write(caption)
+
+                    dataset_metadata[dst_name] = {
+                        "type": "real",
+                        "weight": weights["real_weight"],
+                        "caption": caption,
+                        "original_path": str(img_path),
+                    }
+                except Exception as e:
+                    self.logger.error(f"Error escribiendo caption {caption_file}: {e}")
+
+            tracker.update(status=f"Real: {dst_name}")
+
+        tracker.finish("Dataset LoRA completado")
+
+        # Guardar metadata del dataset
+        dataset_info = {
+            "client_id": client_id,
+            "creation_date": datetime.now().isoformat(),
+            "avatar_type": avatar_type,
+            "distribution_strategy": distribution,
+            "total_images": len(dataset_metadata),
+            "mj_images": actual_mj_count,
+            "real_images": actual_real_count,
+            "balance_ratio": f"{actual_mj_count/(actual_mj_count+actual_real_count)*100:.1f}% MJ / {actual_real_count/(actual_mj_count+actual_real_count)*100:.1f}% Real",
+            "weight_config": weights,
+            "recommended_training": {
+                "total_steps": min(3500, len(dataset_metadata) * 30),
+                "batch_size": 1,
+                "learning_rate": 0.0001 if len(dataset_metadata) < 100 else 0.00008,
+                "dataset_repeats": max(1, 600 // len(dataset_metadata)),
+            },
+        }
+
+        # Guardar archivos de configuración
+        dataset_config_file = dataset_dir / "dataset_config.json"
+        save_json_safe(dataset_info, dataset_config_file, self.logger)
+
+        metadata_file = metadata_dir / "lora_dataset_metadata.json"
+        save_json_safe(dataset_metadata, metadata_file, self.logger)
+
+        self.logger.info(f"Dataset LoRA preparado exitosamente:")
+        self.logger.info(f"  Avatar tipo: {avatar_type}")
+        self.logger.info(f"  Total imágenes: {len(dataset_metadata)}")
+        self.logger.info(f"  Balance: {dataset_info['balance_ratio']}")
+        self.logger.info(f"  Captions generados: {len(dataset_metadata)}")
+
+        return True
+
+    # Métodos auxiliares privados
+
+    def _get_image_files(self, source_dir: str) -> List[Path]:
+        """Obtiene archivos de imagen evitando duplicados y soportando RAW"""
+        source_path = Path(source_dir)
+
+        all_extensions = (
+            self.config.supported_extensions["standard"]
+            + self.config.supported_extensions["raw"]
+        )
+
+        # Búsqueda sin duplicados usando resolución de paths
         unique_files = []
         seen_paths = set()
 
@@ -79,303 +460,165 @@ class DataPreprocessor:
             f
             for f in unique_files
             if f.suffix.lower()
-            in [ext.lower() for ext in self.supported_extensions["raw"]]
+            in [ext.lower() for ext in self.config.supported_extensions["raw"]]
         ]
         standard_files = [
             f
             for f in unique_files
             if f.suffix.lower()
-            in [ext.lower() for ext in self.supported_extensions["standard"]]
+            in [ext.lower() for ext in self.config.supported_extensions["standard"]]
         ]
 
-        print(f"📊 Total archivos únicos encontrados: {len(unique_files)}")
+        self.logger.debug(f"Archivos encontrados: {len(unique_files)} total")
         if raw_files:
-            print(f"📸 Archivos RAW: {len(raw_files)}")
-            if not RAW_SUPPORT:
-                print(
-                    f"❌ Para procesar archivos RAW, instala: pip install rawpy imageio"
-                )
-                return []
+            self.logger.info(f"Archivos RAW: {len(raw_files)}")
         if standard_files:
-            print(f"🖼️ Archivos estándar: {len(standard_files)}")
+            self.logger.info(f"Archivos estándar: {len(standard_files)}")
 
         return sorted(unique_files)
 
-    def convert_raw_to_temp_jpeg(self, raw_path, temp_dir):
+    def _convert_raw_to_temp_jpeg(
+        self, raw_path: Path, temp_dir: Path
+    ) -> Optional[Path]:
         """
         Convierte archivo RAW a JPEG temporal para procesamiento
         VERSIÓN CORREGIDA - Compatible con rawpy estándar
         """
         if not RAW_SUPPORT:
-            raise ImportError("rawpy no está disponible")
+            self.logger.error("rawpy no está disponible")
+            return None
 
-        temp_dir = Path(temp_dir)
         temp_dir.mkdir(parents=True, exist_ok=True)
-
-        # Generar nombre temporal
         temp_name = f"temp_{raw_path.stem}.jpg"
         temp_path = temp_dir / temp_name
 
-        print(f"      🔄 Convirtiendo RAW: {raw_path.name} -> {temp_name}")
-
         try:
-            # Leer archivo RAW
             with rawpy.imread(str(raw_path)) as raw:
                 # Configuración compatible - solo parámetros estándar
                 rgb = raw.postprocess(
-                    use_camera_wb=True,  # Balance de blancos de cámara
-                    half_size=False,  # Resolución completa
-                    no_auto_bright=True,  # Sin auto-brillo
-                    output_bps=8,  # 8 bits por canal
-                    bright=1.0,  # Brillo normal
-                    # Removidos parámetros incompatibles
+                    use_camera_wb=True,
+                    half_size=False,
+                    no_auto_bright=True,
+                    output_bps=8,
+                    bright=1.0,
                 )
 
-            # Guardar como JPEG temporal con alta calidad
             imageio.imwrite(str(temp_path), rgb, quality=98)
-
-            print(f"      ✅ Conversión exitosa: {temp_path}")
+            self.logger.debug(f"Conversión RAW exitosa: {temp_path}")
             return temp_path
 
         except Exception as e:
-            print(f"      ❌ Error convirtiendo {raw_path.name}: {str(e)}")
-            print(f"      💡 Intentando configuración básica...")
+            self.logger.warning(f"Error convirtiendo {raw_path.name}: {str(e)}")
 
             # Configuración de respaldo más básica
             try:
                 with rawpy.imread(str(raw_path)) as raw:
-                    # Configuración mínima pero robusta
                     rgb = raw.postprocess()  # Usar configuración por defecto
 
                 imageio.imwrite(str(temp_path), rgb, quality=95)
-                print(
-                    f"      ✅ Conversión exitosa con configuración básica: {temp_path}"
+                self.logger.info(
+                    f"Conversión RAW exitosa con configuración básica: {temp_path}"
                 )
                 return temp_path
 
             except Exception as e2:
-                print(f"      ❌ Conversión falló completamente: {str(e2)}")
+                self.logger.error(f"Conversión RAW falló completamente: {str(e2)}")
                 return None
 
-    def process_mj_images(self, client_id, source_dir, clients_dir):
-        """Procesa imágenes MJ con captura completa de metadata"""
-        client_path = clients_dir / client_id
-        raw_mj_dir = client_path / "raw_mj"
-        metadata_dir = client_path / "metadata"
+    def _determine_avatar_type_and_distribution(
+        self, mj_count: int, real_count: int
+    ) -> Tuple[str, Dict]:
+        """Determina el tipo de avatar y distribución según configuración y datos disponibles"""
 
-        # Crear directorios
-        raw_mj_dir.mkdir(parents=True, exist_ok=True)
-        metadata_dir.mkdir(parents=True, exist_ok=True)
+        if real_count == 0:
+            avatar_type = "synthetic"
+            distribution = {
+                "description": "100% MidJourney (solo sintético)",
+                "mj_ratio": 1.0,
+                "real_ratio": 0.0,
+            }
+        elif mj_count == 0:
+            avatar_type = "real_only"
+            distribution = {
+                "description": "100% Fotos Reales (solo real)",
+                "mj_ratio": 0.0,
+                "real_ratio": 1.0,
+            }
+        elif real_count >= mj_count * self.config.dataset_dist.real_dominant_threshold:
+            avatar_type = "real_dominant"
+            distribution = {
+                "description": f"{self.config.dataset_dist.avatar_real_real_ratio*100:.0f}% Real / {self.config.dataset_dist.avatar_real_mj_ratio*100:.0f}% MJ (avatar real)",
+                "mj_ratio": self.config.dataset_dist.avatar_real_mj_ratio,
+                "real_ratio": self.config.dataset_dist.avatar_real_real_ratio,
+            }
+        else:
+            avatar_type = "balanced_synthetic"
+            distribution = {
+                "description": f"{self.config.dataset_dist.synthetic_ratio*100:.0f}% MJ / {self.config.dataset_dist.real_ratio*100:.0f}% Real (avatar sintético balanceado)",
+                "mj_ratio": self.config.dataset_dist.synthetic_ratio,
+                "real_ratio": self.config.dataset_dist.real_ratio,
+            }
 
-        print(f"\n🎨 PROCESANDO IMÁGENES MIDJOURNEY")
-        print(f"Origen: {source_dir}")
-        print(f"Destino: {raw_mj_dir}")
-        print("-" * 50)
+        return avatar_type, distribution
 
-        # Obtener archivos de imagen (SIN DUPLICADOS)
-        image_files = self.get_image_files(source_dir)
+    def _calculate_distribution(
+        self,
+        mj_available: int,
+        real_available: int,
+        distribution: Dict,
+        total_target: int,
+    ) -> Tuple[int, int]:
+        """Calcula la distribución exacta de imágenes"""
 
-        if not image_files:
-            print(f"❌ No se encontraron imágenes en {source_dir}")
-            return False
+        target_mj = int(total_target * distribution["mj_ratio"])
+        target_real = int(total_target * distribution["real_ratio"])
 
-        print(f"📸 Encontradas {len(image_files)} imágenes")
+        # Ajustar si se excede lo disponible
+        if target_mj > mj_available:
+            target_mj = mj_available
+            remaining_slots = total_target - target_mj
+            target_real = min(real_available, remaining_slots)
 
-        # Agrupar por UUID (grupos de 4 variaciones)
-        image_groups = self.group_mj_images_by_uuid(image_files)
+        if target_real > real_available:
+            target_real = real_available
+            remaining_slots = total_target - target_real
+            target_mj = min(mj_available, remaining_slots)
 
-        print(f"🔍 Detectados {len(image_groups)} grupos de imágenes")
-        for uuid, files in list(image_groups.items())[:3]:  # Mostrar primeros 3 grupos
-            print(f"   Grupo {uuid[:8]}...: {len(files)} imágenes")
+        return target_mj, target_real
 
-        # Capturar prompt maestro para el cliente
-        client_config = self.load_client_config(client_path)
-        if not client_config.get("prompt_maestro"):
-            prompt_maestro = self.capture_master_prompt()
-            client_config["prompt_maestro"] = prompt_maestro
-            self.save_client_config(client_path, client_config)
-            print(f"✅ Prompt maestro guardado")
+    def _get_weights_for_avatar_type(self, avatar_type: str) -> Dict[str, Any]:
+        """Devuelve pesos de entrenamiento según el tipo de avatar"""
 
-        # Capturar prompts específicos por grupo
-        group_prompts = self.capture_group_prompts(image_groups)
-
-        # Procesar y organizar imágenes
-        metadata_mapping = {}
-        copied_count = 0
-
-        for group_uuid, group_files in image_groups.items():
-            group_prompt = group_prompts.get(group_uuid, "")
-
-            for i, image_file in enumerate(group_files):
-                # Extraer metadata completa del filename
-                mj_metadata = self.extract_complete_mj_metadata(
-                    image_file.name, group_prompt, client_config.get("omni_weight", 160)
-                )
-
-                # Generar nuevo nombre preservando información
-                new_name = self.generate_mj_filename(client_id, mj_metadata, i + 1)
-
-                # Copiar archivo
-                src = image_file
-                dst = raw_mj_dir / new_name
-
-                shutil.copy2(str(src), str(dst))
-
-                # Guardar metadata mapping
-                metadata_mapping[new_name] = mj_metadata
-                copied_count += 1
-
-                if copied_count % 10 == 0:
-                    print(
-                        f"  📋 Procesadas {copied_count}/{len(image_files)} imágenes..."
-                    )
-
-        # Guardar metadata mapping completa
-        mapping_file = metadata_dir / "mj_metadata_mapping.json"
-        with open(mapping_file, "w") as f:
-            json.dump(metadata_mapping, f, indent=2)
-
-        # Guardar análisis de prompts
-        prompts_analysis = self.analyze_prompt_patterns(metadata_mapping)
-        analysis_file = metadata_dir / "mj_prompts_analysis.json"
-        with open(analysis_file, "w") as f:
-            json.dump(prompts_analysis, f, indent=2)
-
-        print(f"\n✅ IMPORTACIÓN MJ COMPLETADA:")
-        print(f"   Imágenes importadas: {copied_count}")
-        print(f"   Grupos procesados: {len(image_groups)}")
-        print(f"   Metadata guardada: {mapping_file}")
-        print(f"   Análisis de prompts: {analysis_file}")
-
-        return True
-
-    def process_real_images(self, client_id, source_dir, clients_dir):
-        """
-        Procesa fotos reales con soporte completo para RAW (.NEF, .CR2, .ARW, .DNG)
-        """
-        client_path = clients_dir / client_id
-        raw_real_dir = client_path / "raw_real"
-        metadata_dir = client_path / "metadata"
-        temp_dir = (
-            client_path / "temp_raw_conversion"
-        )  # Directorio temporal para conversiones
-
-        # Crear directorios
-        raw_real_dir.mkdir(parents=True, exist_ok=True)
-        metadata_dir.mkdir(parents=True, exist_ok=True)
-
-        print(f"\n📷 PROCESANDO FOTOS REALES CON SOPORTE RAW")
-        print(f"Cliente: {client_id}")
-        print(f"Origen: {source_dir}")
-        print(f"Destino: {raw_real_dir}")
-        print("-" * 60)
-
-        # Obtener archivos de imagen (SIN DUPLICADOS)
-        image_files = self.get_image_files(source_dir)
-
-        if not image_files:
-            print(f"❌ No se encontraron imágenes soportadas en {source_dir}")
-            return False
-
-        # Procesar y analizar cada imagen
-        metadata_mapping = {}
-        copied_count = 0
-        converted_count = 0
-
-        for i, image_file in enumerate(image_files, 1):
-            print(f"\n📷 [{i:3d}/{len(image_files)}] Procesando: {image_file.name}")
-
-            # Verificar si es archivo RAW
-            is_raw = image_file.suffix.lower() in [
-                ext.lower() for ext in self.supported_extensions["raw"]
-            ]
-
-            if is_raw:
-                print(f"      📸 Archivo RAW detectado: {image_file.suffix.upper()}")
-
-                # Convertir RAW a JPEG temporal
-                temp_jpeg = self.convert_raw_to_temp_jpeg(image_file, temp_dir)
-
-                if temp_jpeg is None:
-                    print(f"      ❌ Falló conversión de {image_file.name}")
-                    continue
-
-                # Usar JPEG temporal para análisis
-                source_for_analysis = temp_jpeg
-                converted_count += 1
-            else:
-                # Usar archivo directamente
-                source_for_analysis = image_file
-
-            # Análisis automático de características
-            real_metadata = self.analyze_real_image(image_file, i, is_raw=is_raw)
-
-            # Generar nuevo nombre preservando info de origen
-            new_name = self.generate_real_filename(
-                client_id, real_metadata, i, is_raw=is_raw
-            )
-
-            # Decidir qué archivo copiar al destino final
-            if is_raw:
-                # Para RAW, copiar el archivo original (.NEF)
-                # El procesamiento facial usará la conversión temporal
-                src_file = image_file
-                real_metadata["temp_conversion_path"] = str(temp_jpeg)
-            else:
-                src_file = image_file
-
-            # Copiar archivo original al destino
-            dst = raw_real_dir / new_name
-            shutil.copy2(str(src_file), str(dst))
-
-            # Guardar metadata
-            real_metadata["final_path"] = str(dst)
-            metadata_mapping[new_name] = real_metadata
-            copied_count += 1
-
-            print(f"      ✅ Guardado como: {new_name}")
-
-            if copied_count % 5 == 0:
-                print(f"\n📊 PROGRESO: {copied_count}/{len(image_files)} procesadas...")
-
-        # Guardar metadata mapping
-        mapping_file = metadata_dir / "real_metadata_mapping.json"
-        with open(mapping_file, "w") as f:
-            json.dump(metadata_mapping, f, indent=2)
-
-        # Generar análisis de fotos reales
-        real_analysis = self.analyze_real_photos_patterns(metadata_mapping)
-        real_analysis["conversion_stats"] = {
-            "total_processed": copied_count,
-            "raw_conversions": converted_count,
-            "standard_files": copied_count - converted_count,
+        weight_configs = {
+            "synthetic": {
+                "mj_weight": 1.0,
+                "real_weight": 0.0,
+                "description": "MJ peso completo",
+            },
+            "real_only": {
+                "mj_weight": 0.0,
+                "real_weight": 1.0,
+                "description": "Real peso completo",
+            },
+            "real_dominant": {
+                "mj_weight": 0.8,
+                "real_weight": 1.0,
+                "description": "Real dominante, MJ soporte",
+            },
+            "balanced_synthetic": {
+                "mj_weight": 1.0,
+                "real_weight": 0.3,
+                "description": "MJ dominante, Real soporte",
+            },
         }
 
-        analysis_file = metadata_dir / "real_photos_analysis.json"
-        with open(analysis_file, "w") as f:
-            json.dump(real_analysis, f, indent=2)
+        return weight_configs.get(avatar_type, weight_configs["balanced_synthetic"])
 
-        print(f"\n✅ IMPORTACIÓN FOTOS REALES COMPLETADA:")
-        print(f"   📷 Imágenes procesadas: {copied_count}")
-        print(f"   📸 Conversiones RAW: {converted_count}")
-        print(f"   🖼️ Archivos estándar: {copied_count - converted_count}")
-        print(f"   💾 Metadata guardada: {mapping_file}")
-        print(f"   📊 Análisis guardado: {analysis_file}")
+    # Resto de métodos auxiliares (continuación en siguiente sección...)
 
-        # Limpiar archivos temporales después del procesamiento
-        if temp_dir.exists() and any(temp_dir.iterdir()):
-            print(f"\n🗑️ Limpiando archivos temporales...")
-            try:
-                shutil.rmtree(temp_dir)
-                print(f"   ✅ Archivos temporales eliminados")
-            except Exception as e:
-                print(f"   ⚠️ No se pudieron eliminar archivos temporales: {e}")
-
-        return True
-
-    # === RESTO DE MÉTODOS ORIGINALES SIN CAMBIOS ===
-
-    def group_mj_images_by_uuid(self, image_files):
+    def _group_mj_images_by_uuid(
+        self, image_files: List[Path]
+    ) -> Dict[str, List[Path]]:
         """Agrupa imágenes MJ por UUID (4 variaciones por grupo)"""
         uuid_pattern = r"([a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12})"
         groups = defaultdict(list)
@@ -386,13 +629,12 @@ class DataPreprocessor:
                 uuid = match.group(1)
                 groups[uuid].append(image_file)
             else:
-                # Imágenes sin UUID van a grupo especial
                 groups["no_uuid"].append(image_file)
 
         return dict(groups)
 
-    def capture_master_prompt(self):
-        """Captura el prompt maestro del cliente"""
+    def _capture_master_prompt(self) -> str:
+        """Captura el prompt maestro del cliente interactivamente"""
         print(f"\n📝 CAPTURA DE PROMPT MAESTRO")
         print("=" * 40)
         print("Este es el prompt base exitoso que usaste para el avatar experimental.")
@@ -402,37 +644,30 @@ class DataPreprocessor:
         while True:
             prompt = input("Ingresa el prompt maestro: ").strip()
             if prompt:
-                print(f"\n✅ Prompt maestro capturado ({len(prompt)} caracteres)")
+                print(f"✅ Prompt maestro capturado ({len(prompt)} caracteres)")
                 return prompt
             else:
                 print("❌ El prompt no puede estar vacío")
 
-    def capture_group_prompts(self, image_groups):
+    def _capture_group_prompts(
+        self, image_groups: Dict[str, List[Path]]
+    ) -> Dict[str, str]:
         """Captura prompts específicos para cada grupo de imágenes"""
         print(f"\n📝 CAPTURA DE PROMPTS POR GRUPO")
         print("=" * 40)
-        print("Ahora ingresa el prompt específico usado para cada grupo de 4 imágenes.")
-        print("Puedes copiar/pegar directamente desde tu historial de MJ.")
+        print("Ingresa el prompt específico usado para cada grupo de 4 imágenes.")
         print()
 
         group_prompts = {}
-
         for i, (group_uuid, group_files) in enumerate(image_groups.items(), 1):
             if group_uuid == "no_uuid":
-                print(
-                    f"\n📷 Grupo {i}: Imágenes sin UUID ({len(group_files)} archivos)"
-                )
-                sample_file = group_files[0].name[:50] + "..."
+                print(f"📷 Grupo {i}: Imágenes sin UUID ({len(group_files)} archivos)")
             else:
                 print(
-                    f"\n📷 Grupo {i}: UUID {group_uuid[:8]}... ({len(group_files)} archivos)"
+                    f"📷 Grupo {i}: UUID {group_uuid[:8]}... ({len(group_files)} archivos)"
                 )
-                sample_file = group_files[0].name[:50] + "..."
 
-            print(f"   Ejemplo: {sample_file}")
-            print(
-                f"   Archivos: {[f.name[-6:] for f in group_files]}"
-            )  # Mostrar terminaciones
+            print(f"   Ejemplo: {group_files[0].name[:50]}...")
 
             while True:
                 prompt = input(f"Prompt para grupo {i}: ").strip()
@@ -448,12 +683,12 @@ class DataPreprocessor:
                         group_prompts[group_uuid] = ""
                         break
 
-        print(f"\n✅ Capturados prompts para {len(group_prompts)} grupos")
         return group_prompts
 
-    def extract_complete_mj_metadata(self, filename, group_prompt, omni_weight=160):
-        """Extrae metadata completa de archivo MJ con prompt específico"""
-        # Patrones para extraer parámetros
+    def _extract_complete_mj_metadata(
+        self, filename: str, group_prompt: str, omni_weight: int = 160
+    ) -> Dict[str, Any]:
+        """Extrae metadata completa de archivo MJ"""
         patterns = {
             "user_id": r"^u(\d+)_",
             "uuid": r"([a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12})",
@@ -470,15 +705,15 @@ class DataPreprocessor:
             "weirdness": r"--weird\s*(\d+)",
         }
 
-        # Extraer información básica del filename
         metadata = {
             "original_filename": filename,
             "group_prompt": group_prompt,
             "import_date": datetime.now().isoformat(),
         }
 
-        # Extraer parámetros del filename
+        # Extraer parámetros del filename y prompt
         for param, pattern in patterns.items():
+            # Buscar en filename primero
             match = re.search(pattern, filename, re.IGNORECASE)
             if match:
                 if param in [
@@ -493,32 +728,24 @@ class DataPreprocessor:
                     metadata[param] = int(match.group(1))
                 else:
                     metadata[param] = match.group(1)
+            # Si no se encuentra y hay prompt, buscar ahí
+            elif group_prompt and param not in ["user_id", "uuid", "variant"]:
+                match = re.search(pattern, group_prompt, re.IGNORECASE)
+                if match:
+                    if param in [
+                        "version",
+                        "quality",
+                        "stylize",
+                        "chaos",
+                        "omni_weight",
+                        "variety",
+                        "weirdness",
+                    ]:
+                        metadata[param] = int(match.group(1))
+                    else:
+                        metadata[param] = match.group(1)
 
-        # Extraer parámetros del prompt si están disponibles
-        if group_prompt:
-            for param, pattern in patterns.items():
-                if (
-                    param not in metadata
-                    and param != "user_id"
-                    and param != "uuid"
-                    and param != "variant"
-                ):
-                    match = re.search(pattern, group_prompt, re.IGNORECASE)
-                    if match:
-                        if param in [
-                            "version",
-                            "quality",
-                            "stylize",
-                            "chaos",
-                            "omni_weight",
-                            "variety",
-                            "weirdness",
-                        ]:
-                            metadata[param] = int(match.group(1))
-                        else:
-                            metadata[param] = match.group(1)
-
-        # Valores por defecto para parámetros comunes
+        # Valores por defecto
         defaults = {
             "version": 7,
             "quality": 5,
@@ -534,16 +761,17 @@ class DataPreprocessor:
                 metadata[param] = default_value
 
         # Detectar características del prompt
-        metadata["detected_features"] = self.detect_prompt_features(group_prompt)
+        metadata["detected_features"] = self._detect_prompt_features(group_prompt)
 
         # Limpiar prompt para análisis
         if group_prompt:
             clean_prompt = re.sub(r"--\w+\s*\d*", "", group_prompt).strip()
             metadata["clean_prompt"] = clean_prompt
 
+        self.stats["metadata_extracted"] += 1
         return metadata
 
-    def detect_prompt_features(self, prompt):
+    def _detect_prompt_features(self, prompt: str) -> List[str]:
         """Detecta características específicas del prompt"""
         if not prompt:
             return []
@@ -553,34 +781,17 @@ class DataPreprocessor:
 
         # Características de iluminación
         lighting_features = {
-            "studio_lighting": [
-                "studio lighting",
-                "professional lighting",
-                "studio light",
-            ],
-            "natural_lighting": [
-                "natural light",
-                "window light",
-                "daylight",
-                "natural lighting",
-            ],
-            "dramatic_lighting": [
-                "dramatic lighting",
-                "rembrandt lighting",
-                "dramatic light",
-            ],
-            "soft_lighting": ["soft light", "soft lighting", "gentle light"],
-            "cinematic_lighting": [
-                "cinematic lighting",
-                "cinematic light",
-                "film lighting",
-            ],
+            "studio_lighting": ["studio lighting", "professional lighting"],
+            "natural_lighting": ["natural light", "window light", "daylight"],
+            "dramatic_lighting": ["dramatic lighting", "rembrandt lighting"],
+            "soft_lighting": ["soft light", "gentle light"],
+            "cinematic_lighting": ["cinematic lighting", "film lighting"],
         }
 
         # Características de expresión
         expression_features = {
             "confident": ["confident", "confidence", "assertive"],
-            "serene": ["serene", "calm", "peaceful", "tranquil"],
+            "serene": ["serene", "calm", "peaceful"],
             "trustworthy": ["trustworthy", "reliable", "honest"],
             "wise": ["wise", "wisdom", "sage"],
             "professional": ["professional", "corporate", "business"],
@@ -588,13 +799,12 @@ class DataPreprocessor:
 
         # Características físicas
         physical_features = {
-            "clean_shaven": ["clean-shaven", "clean shaven", "cleanshaven"],
+            "clean_shaven": ["clean-shaven", "clean shaven"],
             "stubble": ["stubble", "short beard", "facial hair"],
             "well_groomed": ["well-groomed", "well groomed", "neat"],
             "refined": ["refined", "polished", "sophisticated"],
         }
 
-        # Buscar características
         all_features = {**lighting_features, **expression_features, **physical_features}
 
         for feature_name, keywords in all_features.items():
@@ -603,11 +813,11 @@ class DataPreprocessor:
 
         return detected
 
-    def generate_mj_filename(self, client_id, metadata, index):
+    def _generate_mj_filename(self, client_id: str, metadata: Dict, index: int) -> str:
         """Genera nombre de archivo preservando metadata importante"""
         uuid_short = metadata.get("uuid", "no_uuid")
         if uuid_short != "no_uuid" and len(uuid_short) > 8:
-            uuid_short = uuid_short.split("-")[-1]  # Último segmento del UUID
+            uuid_short = uuid_short.split("-")[-1]
 
         features = metadata.get("detected_features", [])
         features_str = "-".join(features[:2]) if features else "default"
@@ -616,14 +826,13 @@ class DataPreprocessor:
         style = metadata.get("style", "raw")
 
         filename = f"{client_id}_mj_{index:03d}_{uuid_short}_{features_str}_v{version}_{style}.png"
-
         return filename
 
-    def analyze_prompt_patterns(self, metadata_mapping):
+    def _analyze_prompt_patterns(self, metadata_mapping: Dict) -> Dict[str, Any]:
         """Analiza patrones en los prompts para insights"""
         analysis = {
             "total_images": len(metadata_mapping),
-            "feature_frequency": Counter(),
+            "feature_frequency": {},
             "parameter_distribution": {},
             "prompt_analysis": {},
             "generation_date": datetime.now().isoformat(),
@@ -658,34 +867,13 @@ class DataPreprocessor:
                         "frequency": dict(Counter(values)),
                     }
 
-        # Análisis de prompts
-        all_prompts = [
-            m.get("clean_prompt", "")
-            for m in metadata_mapping.values()
-            if m.get("clean_prompt")
-        ]
-        if all_prompts:
-            # Palabras más comunes
-            all_words = []
-            for prompt in all_prompts:
-                words = re.findall(r"\b\w+\b", prompt.lower())
-                all_words.extend(words)
-
-            analysis["prompt_analysis"] = {
-                "total_prompts": len(all_prompts),
-                "avg_length": sum(len(p) for p in all_prompts) / len(all_prompts),
-                "common_words": dict(Counter(all_words).most_common(20)),
-            }
-
         return analysis
 
-    def analyze_real_image(self, image_file, index, is_raw=False):
-        """
-        Analiza automáticamente características de foto real
-        """
+    def _analyze_real_image(
+        self, image_file: Path, index: int, is_raw: bool = False
+    ) -> Dict[str, Any]:
+        """Analiza automáticamente características de foto real"""
         filename = image_file.name.lower()
-
-        # Detectar características del nombre del archivo
         detected_features = []
 
         # Análisis de iluminación
@@ -693,11 +881,9 @@ class DataPreprocessor:
             detected_features.append("studio_lighting")
         elif any(word in filename for word in ["natural", "window", "outdoor"]):
             detected_features.append("natural_lighting")
-        elif any(word in filename for word in ["indoor", "room", "inside"]):
-            detected_features.append("indoor_lighting")
 
         # Análisis de calidad
-        if any(word in filename for word in ["hq", "high", "quality", "professional"]):
+        if any(word in filename for word in ["hq", "high", "quality"]):
             detected_features.append("high_quality")
         elif any(word in filename for word in ["casual", "phone", "mobile"]):
             detected_features.append("casual_quality")
@@ -708,8 +894,7 @@ class DataPreprocessor:
                 ["raw_format", "high_dynamic_range", "professional_capture"]
             )
 
-        # Análisis de sesión (agrupar por fecha/hora si es posible)
-        session_group = f"session_{(index-1)//10 + 1:02d}"  # Grupos de 10
+        session_group = f"session_{(index-1)//10 + 1:02d}"
 
         metadata = {
             "original_filename": image_file.name,
@@ -725,34 +910,31 @@ class DataPreprocessor:
 
         return metadata
 
-    def generate_real_filename(self, client_id, metadata, index, is_raw=False):
-        """
-        Genera nombre para foto real preservando información de formato
-        """
+    def _generate_real_filename(
+        self, client_id: str, metadata: Dict, index: int, is_raw: bool = False
+    ) -> str:
+        """Genera nombre para foto real preservando información de formato"""
         session = metadata.get("session_group", f"session_{index:02d}")
         features = metadata.get("detected_features", [])
         features_str = "-".join(features[:2]) if features else "standard"
 
-        # Preservar extensión original pero normalizar nombre
         original_ext = metadata.get("original_format", ".JPG").lower()
         format_indicator = "raw" if is_raw else "std"
 
         filename = f"{client_id}_real_{index:03d}_{session}_{format_indicator}_{features_str}{original_ext}"
-
         return filename
 
-    def analyze_real_photos_patterns(self, metadata_mapping):
+    def _analyze_real_photos_patterns(self, metadata_mapping: Dict) -> Dict[str, Any]:
         """Analiza patrones en fotos reales"""
         analysis = {
             "total_images": len(metadata_mapping),
-            "feature_frequency": Counter(),
-            "session_distribution": Counter(),
-            "format_distribution": Counter(),
+            "feature_frequency": {},
+            "session_distribution": {},
+            "format_distribution": {},
             "avg_file_size_mb": 0,
             "analysis_date": datetime.now().isoformat(),
         }
 
-        # Analizar características
         all_features = []
         session_counts = []
         format_counts = []
@@ -781,145 +963,9 @@ class DataPreprocessor:
 
         return analysis
 
-    def prepare_lora_dataset(self, client_id, clients_dir):
-        """Prepara dataset final para LoRA con balance 85% MJ / 15% Real"""
-        client_path = clients_dir / client_id
-        processed_dir = client_path / "processed"
-        dataset_dir = client_path / "dataset_lora"
-        metadata_dir = client_path / "metadata"
-
-        print(f"\n🎯 PREPARANDO DATASET LORA CON BALANCE PROFESIONAL")
-        print("-" * 50)
-
-        if not processed_dir.exists():
-            print(
-                f"❌ No hay imágenes procesadas. Ejecuta primero el procesamiento facial."
-            )
-            return False
-
-        # Obtener imágenes procesadas por tipo
-        processed_images = list(processed_dir.glob("*.png"))
-
-        if not processed_images:
-            print(f"❌ No hay imágenes procesadas disponibles")
-            return False
-
-        # Separar por tipo (MJ vs Real)
-        mj_images = [img for img in processed_images if "_mj_" in img.name]
-        real_images = [img for img in processed_images if "_real_" in img.name]
-
-        print(f"📊 IMÁGENES DISPONIBLES:")
-        print(f"   MJ: {len(mj_images)} imágenes")
-        print(f"   Real: {len(real_images)} imágenes")
-
-        # Calcular balance ideal (85% MJ / 15% Real)
-        total_available = len(mj_images) + len(real_images)
-
-        if total_available < 30:
-            print(
-                f"⚠️ Pocas imágenes disponibles ({total_available}). Recomendado mínimo: 50"
-            )
-
-        # Calcular distribución objetivo
-        target_mj_count = int(total_available * 0.85)
-        target_real_count = int(total_available * 0.15)
-
-        # Ajustar si no hay suficientes de algún tipo
-        actual_mj_count = min(len(mj_images), target_mj_count)
-        actual_real_count = min(len(real_images), target_real_count)
-
-        print(f"\n🎯 BALANCE OBJETIVO:")
-        print(
-            f"   MJ seleccionadas: {actual_mj_count} ({actual_mj_count/total_available*100:.1f}%)"
-        )
-        print(
-            f"   Real seleccionadas: {actual_real_count} ({actual_real_count/total_available*100:.1f}%)"
-        )
-
-        # Seleccionar mejores imágenes (por confianza facial si está disponible)
-        selected_mj = self.select_best_images(mj_images, actual_mj_count)
-        selected_real = self.select_best_images(real_images, actual_real_count)
-
-        # Crear directorio de dataset
-        dataset_dir.mkdir(parents=True, exist_ok=True)
-
-        # Copiar imágenes seleccionadas con pesos diferenciados
-        dataset_metadata = {}
-
-        # Copiar imágenes MJ (peso normal)
-        for i, img_path in enumerate(selected_mj, 1):
-            dst_name = f"{client_id}_mj_{i:03d}.png"
-            dst_path = dataset_dir / dst_name
-            shutil.copy2(img_path, dst_path)
-
-            # Generar caption rico para MJ
-            caption = self.generate_mj_caption(client_id, img_path, metadata_dir)
-            caption_file = dataset_dir / f"{client_id}_mj_{i:03d}.txt"
-            with open(caption_file, "w") as f:
-                f.write(caption)
-
-            dataset_metadata[dst_name] = {
-                "type": "mj",
-                "weight": 1.0,
-                "caption": caption,
-                "original_path": str(img_path),
-            }
-
-        # Copiar imágenes reales (peso reducido)
-        for i, img_path in enumerate(selected_real, 1):
-            dst_name = f"{client_id}_real_{i:03d}.png"
-            dst_path = dataset_dir / dst_name
-            shutil.copy2(img_path, dst_path)
-
-            # Generar caption para fotos reales
-            caption = self.generate_real_caption(client_id, img_path, metadata_dir)
-            caption_file = dataset_dir / f"{client_id}_real_{i:03d}.txt"
-            with open(caption_file, "w") as f:
-                f.write(caption)
-
-            dataset_metadata[dst_name] = {
-                "type": "real",
-                "weight": 0.35,  # Peso reducido para fotos reales
-                "caption": caption,
-                "original_path": str(img_path),
-            }
-
-        # Guardar metadata del dataset
-        dataset_info = {
-            "client_id": client_id,
-            "creation_date": datetime.now().isoformat(),
-            "total_images": len(dataset_metadata),
-            "mj_images": actual_mj_count,
-            "real_images": actual_real_count,
-            "balance_ratio": f"{actual_mj_count/len(dataset_metadata)*100:.1f}% MJ / {actual_real_count/len(dataset_metadata)*100:.1f}% Real",
-            "weight_config": {"mj_weight": 1.0, "real_weight": 0.35},
-            "recommended_training": {
-                "total_steps": min(3000, len(dataset_metadata) * 25),
-                "batch_size": 1,
-                "learning_rate": 0.0001,
-                "dataset_repeats": max(1, 500 // len(dataset_metadata)),
-            },
-        }
-
-        # Guardar archivos de configuración
-        dataset_config_file = dataset_dir / "dataset_config.json"
-        with open(dataset_config_file, "w") as f:
-            json.dump(dataset_info, f, indent=2)
-
-        metadata_file = metadata_dir / "lora_dataset_metadata.json"
-        with open(metadata_file, "w") as f:
-            json.dump(dataset_metadata, f, indent=2)
-
-        print(f"\n✅ DATASET LORA PREPARADO:")
-        print(f"   Total imágenes: {len(dataset_metadata)}")
-        print(f"   Balance: {dataset_info['balance_ratio']}")
-        print(f"   Captions generados: {len(dataset_metadata)} archivos .txt")
-        print(f"   Configuración: {dataset_config_file}")
-        print(f"   Metadata: {metadata_file}")
-
-        return True
-
-    def select_best_images(self, image_list, target_count):
+    def _select_best_images(
+        self, image_list: List[Path], target_count: int
+    ) -> List[Path]:
         """Selecciona las mejores imágenes basado en criterios de calidad"""
         if len(image_list) <= target_count:
             return image_list
@@ -928,77 +974,58 @@ class DataPreprocessor:
         sorted_images = sorted(image_list, key=lambda x: x.stat().st_size, reverse=True)
         return sorted_images[:target_count]
 
-    def generate_mj_caption(self, client_id, image_path, metadata_dir):
+    def _generate_mj_caption(
+        self, client_id: str, image_path: Path, metadata_dir: Path
+    ) -> str:
         """Genera caption rico para imagen MJ usando metadata preservada"""
-        # Cargar metadata MJ
         mj_metadata_file = metadata_dir / "mj_metadata_mapping.json"
+        mj_metadata = load_json_safe(mj_metadata_file, {})
 
-        if mj_metadata_file.exists():
-            with open(mj_metadata_file, "r") as f:
-                mj_metadata = json.load(f)
+        # Buscar metadata para esta imagen
+        for original_name, metadata in mj_metadata.items():
+            if original_name in image_path.name or any(
+                part in image_path.name for part in original_name.split("_")
+            ):
+                prompt_base = metadata.get("clean_prompt", f"portrait of {client_id}")
+                features = metadata.get("detected_features", [])
 
-            # Buscar metadata para esta imagen
-            for original_name, metadata in mj_metadata.items():
-                if original_name in image_path.name or any(
-                    part in image_path.name for part in original_name.split("_")
-                ):
-                    # Usar prompt y características detectadas
-                    prompt_base = metadata.get(
-                        "clean_prompt", f"portrait of {client_id}"
-                    )
-                    features = metadata.get("detected_features", [])
+                caption_parts = [prompt_base]
+                if features:
+                    caption_parts.append(", ".join(features))
 
-                    # Construir caption rico
-                    caption_parts = [prompt_base]
-
-                    if features:
-                        caption_parts.append(", ".join(features))
-
-                    caption_parts.extend(
-                        ["detailed face", "high quality", "professional photography"]
-                    )
-
-                    return ", ".join(caption_parts)
+                caption_parts.extend(
+                    ["detailed face", "high quality", "professional photography"]
+                )
+                return ", ".join(caption_parts)
 
         # Fallback caption
         return f"portrait of {client_id}, detailed face, high quality photography, professional headshot"
 
-    def generate_real_caption(self, client_id, image_path, metadata_dir):
+    def _generate_real_caption(
+        self, client_id: str, image_path: Path, metadata_dir: Path
+    ) -> str:
         """Genera caption para foto real enfocado en compatibilidad deepfacelive"""
-        # Cargar metadata de fotos reales
         real_metadata_file = metadata_dir / "real_metadata_mapping.json"
+        real_metadata = load_json_safe(real_metadata_file, {})
 
         base_caption = f"reference photo of {client_id}, natural facial structure, geometric anchor points, detailed facial mapping"
 
-        if real_metadata_file.exists():
-            with open(real_metadata_file, "r") as f:
-                real_metadata = json.load(f)
-
-            # Buscar metadata para esta imagen
-            for original_name, metadata in real_metadata.items():
-                if original_name in image_path.name:
-                    features = metadata.get("detected_features", [])
-
-                    if features:
-                        feature_text = ", ".join(features)
-                        return f"{base_caption}, {feature_text}, compatible for face swap technology"
+        # Buscar metadata para esta imagen
+        for original_name, metadata in real_metadata.items():
+            if original_name in image_path.name:
+                features = metadata.get("detected_features", [])
+                if features:
+                    feature_text = ", ".join(features)
+                    return f"{base_caption}, {feature_text}, compatible for face swap technology"
 
         return f"{base_caption}, compatible for face swap technology"
 
-    def load_client_config(self, client_path):
+    def _load_client_config(self, client_path: Path) -> Dict[str, Any]:
         """Carga configuración del cliente"""
         config_file = client_path / "metadata" / "client_config.json"
+        return load_json_safe(config_file, {})
 
-        if config_file.exists():
-            with open(config_file, "r") as f:
-                return json.load(f)
-        else:
-            return {}
-
-    def save_client_config(self, client_path, config):
+    def _save_client_config(self, client_path: Path, config: Dict[str, Any]):
         """Guarda configuración del cliente"""
         config_file = client_path / "metadata" / "client_config.json"
-        config_file.parent.mkdir(parents=True, exist_ok=True)
-
-        with open(config_file, "w") as f:
-            json.dump(config, f, indent=2)
+        save_json_safe(config, config_file, self.logger)
