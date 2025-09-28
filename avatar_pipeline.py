@@ -1,7 +1,10 @@
 #!/usr/bin/env python3
 """
-Avatar Pipeline - Sistema Completo Profesional - HOTFIX VERSION
-CORRIGE: Parámetros QC demasiado estrictos para archivos RAW
+Avatar Pipeline - VERSIÓN CON FIXES DE NAVEGACIÓN Y CUDA
+FIXES APLICADOS:
+- Navegación correcta al crear cliente
+- Mejor detección e instrucciones para CUDA
+- Validación de PyTorch con CUDA específica
 """
 
 import os
@@ -115,6 +118,85 @@ class AvatarPipeline:
             print("⚠️ tkinter no disponible. Ingresa la ruta manualmente:")
             return input("Ruta del directorio: ").strip()
 
+    def check_cuda_installation(self):
+        """Verifica instalación de CUDA con diagnóstico detallado"""
+        print("\n🔍 DIAGNÓSTICO DE CUDA")
+        print("-" * 25)
+
+        try:
+            import torch
+
+            print(f"✅ PyTorch {torch.__version__} instalado")
+
+            # Verificar CUDA disponible
+            cuda_available = torch.cuda.is_available()
+            print(f"CUDA disponible: {'✅' if cuda_available else '❌'}")
+
+            if cuda_available:
+                device_count = torch.cuda.device_count()
+                print(f"Dispositivos CUDA: {device_count}")
+
+                for i in range(device_count):
+                    gpu_name = torch.cuda.get_device_name(i)
+                    gpu_memory = torch.cuda.get_device_properties(i).total_memory / (
+                        1024**3
+                    )
+                    print(f"  GPU {i}: {gpu_name} ({gpu_memory:.1f}GB)")
+
+                # Verificar versión CUDA
+                cuda_version = torch.version.cuda
+                print(f"Versión CUDA: {cuda_version}")
+
+                return True
+            else:
+                print("\n❌ CUDA NO DISPONIBLE")
+                print("Posibles causas:")
+                print("1. PyTorch instalado sin soporte CUDA")
+                print("2. Drivers NVIDIA no instalados o desactualizados")
+                print("3. CUDA Toolkit no instalado")
+
+                return False
+
+        except ImportError:
+            print("❌ PyTorch no instalado")
+            return False
+
+    def fix_cuda_installation(self):
+        """Proporciona instrucciones específicas para corregir CUDA"""
+        print("\n🔧 SOLUCIONES PARA CUDA")
+        print("=" * 25)
+
+        print("PASO 1: Verificar GPU NVIDIA")
+        print("  - Abre el Administrador de dispositivos")
+        print("  - Busca en 'Adaptadores de pantalla'")
+        print("  - Debe aparecer una GPU NVIDIA")
+
+        print("\nPASO 2: Instalar/Actualizar Drivers NVIDIA")
+        print("  - Visita: https://www.nvidia.com/drivers/")
+        print("  - Descarga el driver más reciente para tu GPU")
+        print("  - Reinicia después de la instalación")
+
+        print("\nPASO 3: Reinstalar PyTorch con CUDA")
+        print("  Desinstalar PyTorch actual:")
+        print("    pip uninstall torch torchvision torchaudio")
+        print("")
+        print("  Instalar PyTorch con CUDA 11.8:")
+        print(
+            "    pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu118"
+        )
+        print("")
+        print("  O con CUDA 12.1:")
+        print(
+            "    pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121"
+        )
+
+        print("\nPASO 4: Verificar instalación")
+        print(
+            "  python -c \"import torch; print(f'CUDA: {torch.cuda.is_available()}')\""
+        )
+
+        return input("\n¿Continuar sin CUDA? (s/n): ").lower().startswith("s")
+
     # === GESTIÓN DE CLIENTES ===
 
     def setup_project(self):
@@ -149,6 +231,7 @@ class AvatarPipeline:
         self.wait_input()
 
     def create_client(self):
+        """VERSIÓN CORREGIDA: Navega automáticamente al menú de operaciones"""
         self.clear_screen()
         self.show_header()
 
@@ -206,17 +289,24 @@ class AvatarPipeline:
         print(f"\n✅ Cliente '{client_id}' creado exitosamente!")
         print(f"📋 Configuración guardada en: {config_file}")
 
-        # Preguntar si seleccionarlo
-        if (
-            input("\n¿Seleccionar este cliente para trabajar? (s/n): ")
-            .lower()
-            .startswith("s")
-        ):
+        # FIX: Preguntar si seleccionarlo Y navegar automáticamente
+        select_client = (
+            input("\n¿Seleccionar este cliente para trabajar? (s/n): ").lower().strip()
+        )
+
+        if select_client.startswith("s"):
             self.current_client = client_id
             print(f"🎯 Cliente '{client_id}' seleccionado")
+            print(f"🚀 Navegando al menú de operaciones del cliente...")
 
-        self.wait_input()
-        return True
+            time.sleep(1)  # Pausa breve para que el usuario vea el mensaje
+
+            # CORRECCIÓN: Ir directamente al menú de operaciones
+            self.run_client_operations()
+            return "operations"  # Señal especial para salir del bucle de gestión
+        else:
+            self.wait_input()
+            return True
 
     def list_clients(self):
         self.clear_screen()
@@ -552,12 +642,12 @@ class AvatarPipeline:
             qc_params = self.get_qc_params_for_source(is_raw_source=False)
             print("🔧 Usando parámetros estándar para archivos nativos")
 
-        # Usar face_processor para procesamiento completo
+        # CORRECCIÓN: Usar force_qc_params en lugar de qc_params
         success = self.face_processor.process_client_images(
             client_id=self.current_client,
             clients_dir=self.clients_dir,
             source_type=source_type,
-            qc_params=qc_params,  # Usar parámetros adaptativos
+            force_qc_params=qc_params,  # ← CORREGIDO: force_qc_params
         )
 
         if success:
@@ -606,10 +696,33 @@ class AvatarPipeline:
             self.wait_input()
             return False
 
-        # Usar lora_trainer para configuración
-        return self.lora_trainer.configure_training(
-            client_id=self.current_client, clients_dir=self.clients_dir
-        )
+        print(f"\n⚙️ CONFIGURANDO ENTRENAMIENTO LORA...")
+        print(f"Cliente: {self.current_client}")
+        print("-" * 40)
+
+        try:
+            # Usar lora_trainer para configuración
+            result = self.lora_trainer.configure_training(
+                client_id=self.current_client, clients_dir=self.clients_dir
+            )
+
+            if result:
+                print(f"\n✅ Configuración de entrenamiento completada")
+                print(f"📋 El entrenamiento está listo para iniciarse")
+            else:
+                print(f"\n❌ Configuración cancelada o falló")
+
+            self.wait_input()
+            return result
+
+        except Exception as e:
+            print(f"\n❌ Error en configuración: {str(e)}")
+            print(f"🔧 Detalles del error para debug:")
+            import traceback
+
+            traceback.print_exc()
+            self.wait_input()
+            return False
 
     def start_lora_training(self):
         if not self.current_client:
@@ -617,10 +730,78 @@ class AvatarPipeline:
             self.wait_input()
             return False
 
-        # Usar lora_trainer para entrenamiento
-        return self.lora_trainer.start_training(
-            client_id=self.current_client, clients_dir=self.clients_dir
-        )
+        # MEJORA: Verificar CUDA antes de iniciar entrenamiento
+        print(f"\n🚀 VERIFICANDO PREREQUISITOS PARA ENTRENAMIENTO")
+        print("=" * 55)
+
+        # Diagnóstico CUDA detallado
+        cuda_ok = self.check_cuda_installation()
+
+        if not cuda_ok:
+            print(f"\n⚠️ ADVERTENCIA: CUDA NO DISPONIBLE")
+            print("El entrenamiento LoRA requiere GPU con CUDA para ser eficiente.")
+            print(
+                "Sin CUDA, el entrenamiento será extremadamente lento (días vs horas)."
+            )
+
+            continue_anyway = (
+                input("\n¿Continuar sin CUDA? (NO recomendado) (s/n): ").lower().strip()
+            )
+            if not continue_anyway.startswith("s"):
+                # Mostrar instrucciones para corregir CUDA
+                if (
+                    input("\n¿Ver instrucciones para instalar CUDA? (s/n): ")
+                    .lower()
+                    .startswith("s")
+                ):
+                    self.fix_cuda_installation()
+                return False
+
+        print(f"\n🚀 INICIANDO ENTRENAMIENTO LORA...")
+        print(f"Cliente: {self.current_client}")
+        print("-" * 40)
+
+        try:
+            # Usar lora_trainer para entrenamiento con debug mejorado
+            print(f"🔍 Verificando prerequisitos...")
+
+            client_path = self.clients_dir / self.current_client
+
+            # Verificaciones previas con debug
+            dataset_dir = client_path / "dataset_lora"
+            config_file = client_path / "training" / "lora_config.json"
+
+            print(f"📁 Dataset dir existe: {dataset_dir.exists()}")
+            print(f"📄 Config file existe: {config_file.exists()}")
+
+            if dataset_dir.exists():
+                dataset_images = list(dataset_dir.glob("*.png"))
+                print(f"🖼️ Imágenes en dataset: {len(dataset_images)}")
+
+            # Ejecutar entrenamiento
+            result = self.lora_trainer.start_training(
+                client_id=self.current_client, clients_dir=self.clients_dir
+            )
+
+            if result:
+                print(f"\n🎉 ¡Entrenamiento completado exitosamente!")
+                print(f"🧠 Modelo entrenado disponible en:")
+                print(f"   {client_path / 'models'}")
+            else:
+                print(f"\n❌ Entrenamiento falló o fue cancelado")
+                print(f"📋 Revisa los logs para más detalles")
+
+            self.wait_input()
+            return result
+
+        except Exception as e:
+            print(f"\n❌ Error inesperado en entrenamiento: {str(e)}")
+            print(f"🔧 Detalles del error para debug:")
+            import traceback
+
+            traceback.print_exc()
+            self.wait_input()
+            return False
 
     # === MENÚS ===
 
@@ -633,9 +814,10 @@ class AvatarPipeline:
         print("2. 👥 Gestión de clientes")
         print("3. 📊 Ver estadísticas generales")
         print("4. ⚙️  Configurar parámetros globales")
-        print("5. 🚪 Salir")
+        print("5. 🔍 Diagnóstico de CUDA")  # NUEVA OPCIÓN
+        print("6. 🚪 Salir")
 
-        return input("\nSelecciona una opción (1-5): ").strip()
+        return input("\nSelecciona una opción (1-6): ").strip()
 
     def show_client_menu(self):
         self.clear_screen()
@@ -659,6 +841,7 @@ class AvatarPipeline:
         dataset_ready = (client_path / "dataset_lora").exists() and len(
             list((client_path / "dataset_lora").glob("*.png"))
         ) > 0
+        config_ready = (client_path / "training" / "lora_config.json").exists()
         has_models = (client_path / "models").exists() and len(
             list((client_path / "models").glob("*.safetensors"))
         ) > 0
@@ -673,29 +856,41 @@ class AvatarPipeline:
 
         print(f"\n🧠 ENTRENAMIENTO LoRA:")
         if dataset_ready:
-            print("4. ⚙️  Configurar entrenamiento LoRA")
-            print("5. 🚀 Iniciar entrenamiento")
+            status_4 = "✅" if config_ready else "⚙️"
+            status_5 = "🚀" if config_ready else "❌"
+
+            print(f"4. {status_4} Configurar entrenamiento LoRA")
+            print(f"5. {status_5} Iniciar entrenamiento")
             print("6. 📈 Ver progreso de entrenamiento")
+
             if has_models:
                 print("7. 🎨 Generar muestras de prueba")
                 print("8. 📦 Gestionar modelos entrenados")
         else:
             print("4. ❌ Entrenamiento LoRA (necesita dataset procesado)")
+            print("5. ❌ Entrenamiento LoRA (necesita dataset procesado)")
 
         print(f"\n🔧 CONFIGURACIÓN:")
         print("9. 📊 Ver estado del cliente")
         print("10. 🔧 Configurar parámetros específicos")
-        print("11. 🔙 Cambiar de cliente")
-        print("12. 🏠 Volver al menú principal")
+        print("11. 🔍 Diagnóstico de CUDA")  # NUEVA OPCIÓN
+        print("12. 🔙 Cambiar de cliente")
+        print("13. 🏠 Volver al menú principal")
 
-        max_option = 12
+        # Mostrar hints sobre el estado
+        print(f"\n💡 ESTADO ACTUAL:")
+        print(f"   Dataset preparado: {'✅' if dataset_ready else '❌'}")
+        print(f"   Configuración LoRA: {'✅' if config_ready else '❌'}")
+        print(f"   Modelos entrenados: {'✅' if has_models else '❌'}")
+
+        max_option = 13
         return input(f"\nSelecciona una opción (1-{max_option}): ").strip()
 
     # === FUNCIONES DE CONTROL ===
 
     def run_main(self):
-        print("🚀 Iniciando Avatar Pipeline - Sistema Profesional v2.0 HOTFIX")
-        print("✅ Parámetros optimizados para archivos RAW")
+        print("🚀 Iniciando Avatar Pipeline - VERSIÓN CON FIXES")
+        print("✅ Navegación corregida + Diagnóstico CUDA mejorado")
         time.sleep(1)
 
         while True:
@@ -709,7 +904,12 @@ class AvatarPipeline:
                 self.show_general_stats()
             elif choice == "4":
                 self.configure_global_params()
-            elif choice == "5":
+            elif choice == "5":  # NUEVA OPCIÓN
+                self.check_cuda_installation()
+                if not self.check_cuda_installation():
+                    self.fix_cuda_installation()
+                self.wait_input()
+            elif choice == "6":
                 self.clear_screen()
                 print("\n👋 Sistema cerrado correctamente!")
                 break
@@ -724,7 +924,11 @@ class AvatarPipeline:
             if choice == "1":
                 self.list_clients()
             elif choice == "2":
-                self.create_client()
+                # FIX: Manejar el caso especial de navegación directa
+                result = self.create_client()
+                if result == "operations":
+                    # Si create_client retorna "operations", salir del bucle
+                    break
             elif choice == "3":
                 if self.select_client():
                     self.run_client_operations()
@@ -766,9 +970,14 @@ class AvatarPipeline:
                 self.show_client_status()
             elif choice == "10":
                 self.configure_client_params()
-            elif choice == "11":
-                self.select_client()
+            elif choice == "11":  # NUEVA OPCIÓN
+                self.check_cuda_installation()
+                if not self.check_cuda_installation():
+                    self.fix_cuda_installation()
+                self.wait_input()
             elif choice == "12":
+                self.select_client()
+            elif choice == "13":
                 break
             else:
                 print("❌ Opción inválida")
