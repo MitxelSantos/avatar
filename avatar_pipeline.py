@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-Avatar Pipeline - Sistema Completo Profesional
-Coordinador principal con arquitectura modular
+Avatar Pipeline - Sistema Completo Profesional - HOTFIX VERSION
+CORRIGE: Parámetros QC demasiado estrictos para archivos RAW
 """
 
 import os
@@ -41,24 +41,51 @@ class AvatarPipeline:
         self.data_preprocessor = DataPreprocessor()
         self.lora_trainer = LoRATrainer()
 
-        # Parámetros de calidad globales
+        # PARÁMETROS DE CALIDAD GLOBALES - OPTIMIZADOS PARA RAW
         self.qc_params = {
             "face_confidence_threshold": 0.85,
             "face_padding_factor": 1.6,
             "min_file_size_kb": 200,
             "max_file_size_mb": 5,
-            "min_brightness": 40,
-            "max_brightness": 220,
-            "min_contrast": 25,
-            "blur_threshold": 100,
+            "min_brightness": 30,  # Bajado de 40 para RAW
+            "max_brightness": 240,  # Subido de 220 para RAW
+            "min_contrast": 15,  # Bajado de 25 para RAW
+            "blur_threshold": 10,  # Bajado SIGNIFICATIVAMENTE de 100 para RAW
         }
+
+    def get_qc_params_for_source(self, is_raw_source=False):
+        """Devuelve parámetros de QC optimizados según el tipo de fuente"""
+        if is_raw_source:
+            # Parámetros más tolerantes para archivos RAW convertidos
+            return {
+                "face_confidence_threshold": 0.85,
+                "face_padding_factor": 1.6,
+                "min_file_size_kb": 200,
+                "max_file_size_mb": 8,  # RAW puede generar archivos más grandes
+                "min_brightness": 25,  # Más tolerante
+                "max_brightness": 250,  # Más tolerante
+                "min_contrast": 12,  # Más tolerante - RAW puede tener menos contraste aparente
+                "blur_threshold": 8,  # MUY tolerante - RAW convertido puede parecer menos nítido
+            }
+        else:
+            # Parámetros estrictos para archivos nativos (JPEG, PNG)
+            return {
+                "face_confidence_threshold": 0.85,
+                "face_padding_factor": 1.6,
+                "min_file_size_kb": 200,
+                "max_file_size_mb": 5,
+                "min_brightness": 40,
+                "max_brightness": 220,
+                "min_contrast": 25,
+                "blur_threshold": 100,
+            }
 
     def clear_screen(self):
         os.system("cls" if os.name == "nt" else "clear")
 
     def show_header(self):
         print("=" * 70)
-        print("🎯 AVATAR PIPELINE - SISTEMA PROFESIONAL v2.0")
+        print("🎯 AVATAR PIPELINE")
         print("=" * 70)
         if self.current_client:
             print(f"📋 Cliente Actual: {self.current_client}")
@@ -502,12 +529,35 @@ class AvatarPipeline:
         print(f"Cliente: {self.current_client}")
         print("-" * 50)
 
+        # DETECTAR SI HAY ARCHIVOS RAW PARA USAR PARÁMETROS ADAPTATIVOS
+        client_path = self.clients_dir / self.current_client
+        has_raw_files = False
+
+        if source_type in ["all", "real"]:
+            raw_real_dir = client_path / "raw_real"
+            if raw_real_dir.exists():
+                raw_extensions = [".nef", ".cr2", ".arw", ".dng", ".raf", ".orf"]
+                for file_path in raw_real_dir.iterdir():
+                    if file_path.suffix.lower() in raw_extensions:
+                        has_raw_files = True
+                        break
+
+        # Usar parámetros adaptativos
+        if has_raw_files:
+            qc_params = self.get_qc_params_for_source(is_raw_source=True)
+            print("🔧 Usando parámetros optimizados para archivos RAW")
+            print("   📸 Blur threshold: 8 (muy tolerante para RAW)")
+            print("   🔍 Contrast threshold: 12 (tolerante para RAW)")
+        else:
+            qc_params = self.get_qc_params_for_source(is_raw_source=False)
+            print("🔧 Usando parámetros estándar para archivos nativos")
+
         # Usar face_processor para procesamiento completo
         success = self.face_processor.process_client_images(
             client_id=self.current_client,
             clients_dir=self.clients_dir,
             source_type=source_type,
-            qc_params=self.qc_params,
+            qc_params=qc_params,  # Usar parámetros adaptativos
         )
 
         if success:
@@ -644,7 +694,8 @@ class AvatarPipeline:
     # === FUNCIONES DE CONTROL ===
 
     def run_main(self):
-        print("🚀 Iniciando Avatar Pipeline - Sistema Profesional")
+        print("🚀 Iniciando Avatar Pipeline - Sistema Profesional v2.0 HOTFIX")
+        print("✅ Parámetros optimizados para archivos RAW")
         time.sleep(1)
 
         while True:
@@ -812,7 +863,7 @@ class AvatarPipeline:
         print("\n⚙️ CONFIGURACIÓN GLOBAL DE CALIDAD")
         print("-" * 40)
 
-        print("Configuración actual:")
+        print("Configuración actual (optimizada para RAW):")
         for key, value in self.qc_params.items():
             print(f"   {key}: {value}")
 
@@ -827,18 +878,18 @@ class AvatarPipeline:
             # Implementar modificación de parámetros
             pass
         elif choice == "2":
-            # Restaurar defaults
+            # Restaurar defaults optimizados para RAW
             self.qc_params = {
                 "face_confidence_threshold": 0.85,
                 "face_padding_factor": 1.6,
                 "min_file_size_kb": 200,
                 "max_file_size_mb": 5,
-                "min_brightness": 40,
-                "max_brightness": 220,
-                "min_contrast": 25,
-                "blur_threshold": 100,
+                "min_brightness": 30,
+                "max_brightness": 240,
+                "min_contrast": 15,
+                "blur_threshold": 10,
             }
-            print("✅ Parámetros restaurados")
+            print("✅ Parámetros restaurados (optimizados para RAW)")
             self.wait_input()
 
     def configure_client_params(self):

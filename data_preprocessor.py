@@ -1,12 +1,7 @@
 #!/usr/bin/env python3
 """
-data_preprocessor.py
-Módulo especializado para preprocesamiento de datos
-- Captura completa de metadata MidJourney
-- Análisis automático de fotos reales
-- Balance de datos 85% MJ / 15% Real
-- Generación de captions ricos para entrenamiento LoRA
-INCLUYE SOPORTE AUTOMÁTICO PARA ARCHIVOS RAW (.NEF, .CR2, etc.)
+data_preprocessor.py - HOTFIX VERSION
+CORRIGE: Parámetros incompatibles de rawpy.postprocess()
 """
 
 import os
@@ -17,6 +12,17 @@ from pathlib import Path
 from datetime import datetime
 from collections import defaultdict, Counter
 import pandas as pd
+
+# Soporte para archivos RAW
+try:
+    import rawpy
+    import imageio
+
+    RAW_SUPPORT = True
+    print("✅ rawpy disponible - Soporte completo para archivos RAW")
+except ImportError:
+    RAW_SUPPORT = False
+    print("⚠️ rawpy no disponible - Instala con: pip install rawpy imageio")
 
 
 class DataPreprocessor:
@@ -34,6 +40,123 @@ class DataPreprocessor:
             "weirdness",
         ]
 
+        # Extensiones soportadas
+        self.supported_extensions = {
+            "standard": [".png", ".jpg", ".jpeg", ".tiff", ".tif"],
+            "raw": [".nef", ".cr2", ".arw", ".dng", ".raf", ".orf", ".rw2", ".pef"],
+        }
+
+    def get_image_files(self, source_dir):
+        """
+        Obtiene archivos de imagen evitando duplicados y soportando RAW
+        FIX: Elimina el bug de detección duplicada de archivos .NEF
+        """
+        source_path = Path(source_dir)
+
+        # Combinar todas las extensiones soportadas
+        all_extensions = (
+            self.supported_extensions["standard"] + self.supported_extensions["raw"]
+        )
+
+        print(f"🔍 Buscando archivos con extensiones: {all_extensions}")
+
+        # BÚSQUEDA SIN DUPLICADOS - usando resolución de paths
+        unique_files = []
+        seen_paths = set()
+
+        for file_path in source_path.iterdir():
+            if file_path.is_file():
+                # Verificar extensión (case-insensitive)
+                if file_path.suffix.lower() in [ext.lower() for ext in all_extensions]:
+                    # Usar path absoluto resuelto para evitar duplicados
+                    resolved_path = file_path.resolve()
+                    if resolved_path not in seen_paths:
+                        seen_paths.add(resolved_path)
+                        unique_files.append(file_path)
+
+        # Estadísticas por tipo
+        raw_files = [
+            f
+            for f in unique_files
+            if f.suffix.lower()
+            in [ext.lower() for ext in self.supported_extensions["raw"]]
+        ]
+        standard_files = [
+            f
+            for f in unique_files
+            if f.suffix.lower()
+            in [ext.lower() for ext in self.supported_extensions["standard"]]
+        ]
+
+        print(f"📊 Total archivos únicos encontrados: {len(unique_files)}")
+        if raw_files:
+            print(f"📸 Archivos RAW: {len(raw_files)}")
+            if not RAW_SUPPORT:
+                print(
+                    f"❌ Para procesar archivos RAW, instala: pip install rawpy imageio"
+                )
+                return []
+        if standard_files:
+            print(f"🖼️ Archivos estándar: {len(standard_files)}")
+
+        return sorted(unique_files)
+
+    def convert_raw_to_temp_jpeg(self, raw_path, temp_dir):
+        """
+        Convierte archivo RAW a JPEG temporal para procesamiento
+        VERSIÓN CORREGIDA - Compatible con rawpy estándar
+        """
+        if not RAW_SUPPORT:
+            raise ImportError("rawpy no está disponible")
+
+        temp_dir = Path(temp_dir)
+        temp_dir.mkdir(parents=True, exist_ok=True)
+
+        # Generar nombre temporal
+        temp_name = f"temp_{raw_path.stem}.jpg"
+        temp_path = temp_dir / temp_name
+
+        print(f"      🔄 Convirtiendo RAW: {raw_path.name} -> {temp_name}")
+
+        try:
+            # Leer archivo RAW
+            with rawpy.imread(str(raw_path)) as raw:
+                # Configuración compatible - solo parámetros estándar
+                rgb = raw.postprocess(
+                    use_camera_wb=True,  # Balance de blancos de cámara
+                    half_size=False,  # Resolución completa
+                    no_auto_bright=True,  # Sin auto-brillo
+                    output_bps=8,  # 8 bits por canal
+                    bright=1.0,  # Brillo normal
+                    # Removidos parámetros incompatibles
+                )
+
+            # Guardar como JPEG temporal con alta calidad
+            imageio.imwrite(str(temp_path), rgb, quality=98)
+
+            print(f"      ✅ Conversión exitosa: {temp_path}")
+            return temp_path
+
+        except Exception as e:
+            print(f"      ❌ Error convirtiendo {raw_path.name}: {str(e)}")
+            print(f"      💡 Intentando configuración básica...")
+
+            # Configuración de respaldo más básica
+            try:
+                with rawpy.imread(str(raw_path)) as raw:
+                    # Configuración mínima pero robusta
+                    rgb = raw.postprocess()  # Usar configuración por defecto
+
+                imageio.imwrite(str(temp_path), rgb, quality=95)
+                print(
+                    f"      ✅ Conversión exitosa con configuración básica: {temp_path}"
+                )
+                return temp_path
+
+            except Exception as e2:
+                print(f"      ❌ Conversión falló completamente: {str(e2)}")
+                return None
+
     def process_mj_images(self, client_id, source_dir, clients_dir):
         """Procesa imágenes MJ con captura completa de metadata"""
         client_path = clients_dir / client_id
@@ -49,34 +172,8 @@ class DataPreprocessor:
         print(f"Destino: {raw_mj_dir}")
         print("-" * 50)
 
-        # Obtener archivos de imagen (incluyendo RAW potencial de MJ)
-        extensions = (
-            ".png",
-            ".jpg",
-            ".jpeg",
-            ".tiff",
-            ".tif",  # Estándar MJ
-            ".NEF",  # Nikon RAW
-            ".cr2",
-            ".CR2",
-            ".cr3",
-            ".CR3",  # Canon RAW
-            ".arw",
-            ".ARW",  # Sony RAW
-            ".dng",
-            ".DNG",  # Adobe DNG
-            ".orf",
-            ".ORF",  # Olympus RAW
-            ".raf",
-            ".RAF",  # Fujifilm RAW
-            ".rw2",
-            ".RW2",  # Panasonic RAW
-        )
-
-        image_files = []
-        for ext in extensions:
-            image_files.extend(Path(source_dir).glob(f"*{ext}"))
-            image_files.extend(Path(source_dir).glob(f"*{ext.upper()}"))
+        # Obtener archivos de imagen (SIN DUPLICADOS)
+        image_files = self.get_image_files(source_dir)
 
         if not image_files:
             print(f"❌ No se encontraron imágenes en {source_dir}")
@@ -151,6 +248,132 @@ class DataPreprocessor:
         print(f"   Análisis de prompts: {analysis_file}")
 
         return True
+
+    def process_real_images(self, client_id, source_dir, clients_dir):
+        """
+        Procesa fotos reales con soporte completo para RAW (.NEF, .CR2, .ARW, .DNG)
+        """
+        client_path = clients_dir / client_id
+        raw_real_dir = client_path / "raw_real"
+        metadata_dir = client_path / "metadata"
+        temp_dir = (
+            client_path / "temp_raw_conversion"
+        )  # Directorio temporal para conversiones
+
+        # Crear directorios
+        raw_real_dir.mkdir(parents=True, exist_ok=True)
+        metadata_dir.mkdir(parents=True, exist_ok=True)
+
+        print(f"\n📷 PROCESANDO FOTOS REALES CON SOPORTE RAW")
+        print(f"Cliente: {client_id}")
+        print(f"Origen: {source_dir}")
+        print(f"Destino: {raw_real_dir}")
+        print("-" * 60)
+
+        # Obtener archivos de imagen (SIN DUPLICADOS)
+        image_files = self.get_image_files(source_dir)
+
+        if not image_files:
+            print(f"❌ No se encontraron imágenes soportadas en {source_dir}")
+            return False
+
+        # Procesar y analizar cada imagen
+        metadata_mapping = {}
+        copied_count = 0
+        converted_count = 0
+
+        for i, image_file in enumerate(image_files, 1):
+            print(f"\n📷 [{i:3d}/{len(image_files)}] Procesando: {image_file.name}")
+
+            # Verificar si es archivo RAW
+            is_raw = image_file.suffix.lower() in [
+                ext.lower() for ext in self.supported_extensions["raw"]
+            ]
+
+            if is_raw:
+                print(f"      📸 Archivo RAW detectado: {image_file.suffix.upper()}")
+
+                # Convertir RAW a JPEG temporal
+                temp_jpeg = self.convert_raw_to_temp_jpeg(image_file, temp_dir)
+
+                if temp_jpeg is None:
+                    print(f"      ❌ Falló conversión de {image_file.name}")
+                    continue
+
+                # Usar JPEG temporal para análisis
+                source_for_analysis = temp_jpeg
+                converted_count += 1
+            else:
+                # Usar archivo directamente
+                source_for_analysis = image_file
+
+            # Análisis automático de características
+            real_metadata = self.analyze_real_image(image_file, i, is_raw=is_raw)
+
+            # Generar nuevo nombre preservando info de origen
+            new_name = self.generate_real_filename(
+                client_id, real_metadata, i, is_raw=is_raw
+            )
+
+            # Decidir qué archivo copiar al destino final
+            if is_raw:
+                # Para RAW, copiar el archivo original (.NEF)
+                # El procesamiento facial usará la conversión temporal
+                src_file = image_file
+                real_metadata["temp_conversion_path"] = str(temp_jpeg)
+            else:
+                src_file = image_file
+
+            # Copiar archivo original al destino
+            dst = raw_real_dir / new_name
+            shutil.copy2(str(src_file), str(dst))
+
+            # Guardar metadata
+            real_metadata["final_path"] = str(dst)
+            metadata_mapping[new_name] = real_metadata
+            copied_count += 1
+
+            print(f"      ✅ Guardado como: {new_name}")
+
+            if copied_count % 5 == 0:
+                print(f"\n📊 PROGRESO: {copied_count}/{len(image_files)} procesadas...")
+
+        # Guardar metadata mapping
+        mapping_file = metadata_dir / "real_metadata_mapping.json"
+        with open(mapping_file, "w") as f:
+            json.dump(metadata_mapping, f, indent=2)
+
+        # Generar análisis de fotos reales
+        real_analysis = self.analyze_real_photos_patterns(metadata_mapping)
+        real_analysis["conversion_stats"] = {
+            "total_processed": copied_count,
+            "raw_conversions": converted_count,
+            "standard_files": copied_count - converted_count,
+        }
+
+        analysis_file = metadata_dir / "real_photos_analysis.json"
+        with open(analysis_file, "w") as f:
+            json.dump(real_analysis, f, indent=2)
+
+        print(f"\n✅ IMPORTACIÓN FOTOS REALES COMPLETADA:")
+        print(f"   📷 Imágenes procesadas: {copied_count}")
+        print(f"   📸 Conversiones RAW: {converted_count}")
+        print(f"   🖼️ Archivos estándar: {copied_count - converted_count}")
+        print(f"   💾 Metadata guardada: {mapping_file}")
+        print(f"   📊 Análisis guardado: {analysis_file}")
+
+        # Limpiar archivos temporales después del procesamiento
+        if temp_dir.exists() and any(temp_dir.iterdir()):
+            print(f"\n🗑️ Limpiando archivos temporales...")
+            try:
+                shutil.rmtree(temp_dir)
+                print(f"   ✅ Archivos temporales eliminados")
+            except Exception as e:
+                print(f"   ⚠️ No se pudieron eliminar archivos temporales: {e}")
+
+        return True
+
+    # === RESTO DE MÉTODOS ORIGINALES SIN CAMBIOS ===
 
     def group_mj_images_by_uuid(self, image_files):
         """Agrupa imágenes MJ por UUID (4 variaciones por grupo)"""
@@ -456,179 +679,11 @@ class DataPreprocessor:
 
         return analysis
 
-    def process_real_images(self, client_id, source_dir, clients_dir):
-        """Procesa fotos reales con análisis automático (INCLUYE SOPORTE RAW)"""
-        client_path = clients_dir / client_id
-        raw_real_dir = client_path / "raw_real"
-        metadata_dir = client_path / "metadata"
-
-        # Crear directorios
-        raw_real_dir.mkdir(parents=True, exist_ok=True)
-        metadata_dir.mkdir(parents=True, exist_ok=True)
-
-        print(f"\n📷 PROCESANDO FOTOS REALES (INCLUYE RAW)")
-        print(f"Origen: {source_dir}")
-        print(f"Destino: {raw_real_dir}")
-        print("-" * 50)
-
-        # Obtener archivos de imagen (INCLUYE TODOS LOS FORMATOS RAW)
-        extensions = (
-            ".png",
-            ".jpg",
-            ".jpeg",
-            ".tiff",
-            ".tif",  # Estándar
-            ".NEF",  # Nikon RAW
-            ".cr2",
-            ".CR2",
-            ".cr3",
-            ".CR3",  # Canon RAW
-            ".arw",
-            ".ARW",  # Sony RAW
-            ".dng",
-            ".DNG",  # Adobe DNG
-            ".orf",
-            ".ORF",  # Olympus RAW
-            ".raf",
-            ".RAF",  # Fujifilm RAW
-            ".rw2",
-            ".RW2",  # Panasonic RAW
-            ".pef",
-            ".PEF",  # Pentax RAW
-            ".srw",
-            ".SRW",  # Samsung RAW
-            ".3fr",
-            ".3FR",  # Hasselblad RAW
-            ".fff",
-            ".FFF",  # Imacon RAW
-            ".dcr",
-            ".DCR",  # Kodak RAW
-            ".kdc",
-            ".KDC",  # Kodak RAW
-            ".srf",
-            ".SRF",  # Sony RAW (antiguo)
-            ".sr2",
-            ".SR2",  # Sony RAW (antiguo)
-        )
-
-        image_files = []
-        for ext in extensions:
-            image_files.extend(Path(source_dir).glob(f"*{ext}"))
-            image_files.extend(Path(source_dir).glob(f"*{ext.upper()}"))
-
-        if not image_files:
-            print(f"❌ No se encontraron imágenes en {source_dir}")
-            return False
-
-        print(f"📸 Encontradas {len(image_files)} imágenes")
-
-        # Mostrar breakdown por tipo de archivo
-        extensions_found = {}
-        raw_count = 0
-        standard_count = 0
-
-        for img_file in image_files:
-            ext = img_file.suffix.lower()
-            extensions_found[ext] = extensions_found.get(ext, 0) + 1
-
-            if ext in {
-                ".NEF",
-                ".cr2",
-                ".cr3",
-                ".arw",
-                ".dng",
-                ".orf",
-                ".raf",
-                ".rw2",
-                ".pef",
-                ".srw",
-                ".3fr",
-                ".fff",
-                ".dcr",
-                ".kdc",
-                ".srf",
-                ".sr2",
-            }:
-                raw_count += 1
-            else:
-                standard_count += 1
-
-        print(f"📊 BREAKDOWN DE ARCHIVOS:")
-        print(f"   📸 RAW: {raw_count} archivos")
-        print(f"   🖼️  Estándar: {standard_count} archivos")
-
-        if extensions_found:
-            print(f"   Extensiones encontradas: {', '.join(extensions_found.keys())}")
-
-        # Procesar y analizar cada imagen
-        metadata_mapping = {}
-        copied_count = 0
-
-        for i, image_file in enumerate(sorted(image_files), 1):
-            # Análisis automático de características
-            real_metadata = self.analyze_real_image(image_file, i)
-
-            # Generar nuevo nombre
-            new_name = self.generate_real_filename(client_id, real_metadata, i)
-
-            # Copiar archivo
-            src = image_file
-            dst = raw_real_dir / new_name
-
-            shutil.copy2(str(src), str(dst))
-
-            # Guardar metadata
-            metadata_mapping[new_name] = real_metadata
-            copied_count += 1
-
-            if copied_count % 5 == 0:
-                print(f"  📋 Procesadas {copied_count}/{len(image_files)} imágenes...")
-
-        # Guardar metadata mapping
-        mapping_file = metadata_dir / "real_metadata_mapping.json"
-        with open(mapping_file, "w") as f:
-            json.dump(metadata_mapping, f, indent=2)
-
-        # Generar análisis de fotos reales
-        real_analysis = self.analyze_real_photos_patterns(metadata_mapping)
-        analysis_file = metadata_dir / "real_photos_analysis.json"
-        with open(analysis_file, "w") as f:
-            json.dump(real_analysis, f, indent=2)
-
-        print(f"\n✅ IMPORTACIÓN FOTOS REALES COMPLETADA:")
-        print(f"   Imágenes importadas: {copied_count}")
-        print(f"   RAW procesados: {raw_count}")
-        print(f"   Estándar procesados: {standard_count}")
-        print(f"   Metadata guardada: {mapping_file}")
-        print(f"   Análisis guardado: {analysis_file}")
-
-        return True
-
-    def analyze_real_image(self, image_file, index):
-        """Analiza automáticamente características de foto real (INCLUYE RAW)"""
+    def analyze_real_image(self, image_file, index, is_raw=False):
+        """
+        Analiza automáticamente características de foto real
+        """
         filename = image_file.name.lower()
-        file_ext = image_file.suffix.lower()
-
-        # Detectar si es archivo RAW (case-insensitive)
-        raw_extensions = {
-            ".NEF",
-            ".cr2",
-            ".cr3",
-            ".arw",
-            ".dng",
-            ".orf",
-            ".raf",
-            ".rw2",
-            ".pef",
-            ".srw",
-            ".3fr",
-            ".fff",
-            ".dcr",
-            ".kdc",
-            ".srf",
-            ".sr2",
-        }
-        is_raw_file = file_ext.lower() in raw_extensions
 
         # Detectar características del nombre del archivo
         detected_features = []
@@ -647,34 +702,14 @@ class DataPreprocessor:
         elif any(word in filename for word in ["casual", "phone", "mobile"]):
             detected_features.append("casual_quality")
 
-        # Análisis específico RAW
-        if is_raw_file:
-            detected_features.append("raw_source")
-            detected_features.append("maximum_quality")
+        # Si es RAW, agregar características específicas
+        if is_raw:
+            detected_features.extend(
+                ["raw_format", "high_dynamic_range", "professional_capture"]
+            )
 
         # Análisis de sesión (agrupar por fecha/hora si es posible)
         session_group = f"session_{(index-1)//10 + 1:02d}"  # Grupos de 10
-
-        # Detectar cámara por extensión RAW (case-insensitive)
-        camera_brand = "unknown"
-        file_ext_lower = file_ext.lower()
-
-        if file_ext_lower == ".NEF":
-            camera_brand = "nikon"
-        elif file_ext_lower in {".cr2", ".cr3"}:
-            camera_brand = "canon"
-        elif file_ext_lower in {".arw", ".srf", ".sr2"}:
-            camera_brand = "sony"
-        elif file_ext_lower == ".orf":
-            camera_brand = "olympus"
-        elif file_ext_lower == ".raf":
-            camera_brand = "fujifilm"
-        elif file_ext_lower == ".rw2":
-            camera_brand = "panasonic"
-        elif file_ext_lower == ".pef":
-            camera_brand = "pentax"
-        elif file_ext_lower == ".srw":
-            camera_brand = "samsung"
 
         metadata = {
             "original_filename": image_file.name,
@@ -682,53 +717,46 @@ class DataPreprocessor:
             "session_group": session_group,
             "detected_features": detected_features,
             "image_type": "real_photo",
+            "is_raw_format": is_raw,
+            "original_format": image_file.suffix.upper(),
             "purpose": "deepfacelive_compatibility",
             "file_size_mb": image_file.stat().st_size / (1024 * 1024),
-            "is_raw_source": is_raw_file,
-            "file_extension": file_ext.lower(),
-            "camera_brand": camera_brand,
-            "quality_tier": "raw_maximum" if is_raw_file else "standard",
         }
 
         return metadata
 
-    def generate_real_filename(self, client_id, metadata, index):
-        """Genera nombre para foto real (preserva info RAW)"""
+    def generate_real_filename(self, client_id, metadata, index, is_raw=False):
+        """
+        Genera nombre para foto real preservando información de formato
+        """
         session = metadata.get("session_group", f"session_{index:02d}")
         features = metadata.get("detected_features", [])
         features_str = "-".join(features[:2]) if features else "standard"
 
-        # Indicar si es RAW y cámara
-        raw_suffix = ""
-        if metadata.get("is_raw_source", False):
-            camera = metadata.get("camera_brand", "unknown")
-            raw_suffix = f"_RAW_{camera.upper()}"
+        # Preservar extensión original pero normalizar nombre
+        original_ext = metadata.get("original_format", ".JPG").lower()
+        format_indicator = "raw" if is_raw else "std"
 
-        filename = (
-            f"{client_id}_real_{index:03d}_{session}_{features_str}{raw_suffix}.png"
-        )
+        filename = f"{client_id}_real_{index:03d}_{session}_{format_indicator}_{features_str}{original_ext}"
 
         return filename
 
     def analyze_real_photos_patterns(self, metadata_mapping):
-        """Analiza patrones en fotos reales (INCLUYE STATS RAW)"""
+        """Analiza patrones en fotos reales"""
         analysis = {
             "total_images": len(metadata_mapping),
             "feature_frequency": Counter(),
             "session_distribution": Counter(),
-            "camera_distribution": Counter(),
+            "format_distribution": Counter(),
             "avg_file_size_mb": 0,
-            "raw_statistics": {},
             "analysis_date": datetime.now().isoformat(),
         }
 
         # Analizar características
         all_features = []
         session_counts = []
+        format_counts = []
         file_sizes = []
-        camera_brands = []
-        raw_count = 0
-        standard_count = 0
 
         for metadata in metadata_mapping.values():
             features = metadata.get("detected_features", [])
@@ -737,42 +765,19 @@ class DataPreprocessor:
             session = metadata.get("session_group", "unknown")
             session_counts.append(session)
 
+            original_format = metadata.get("original_format", "unknown")
+            format_counts.append(original_format)
+
             size = metadata.get("file_size_mb", 0)
             if size > 0:
                 file_sizes.append(size)
 
-            camera = metadata.get("camera_brand", "unknown")
-            if camera != "unknown":
-                camera_brands.append(camera)
-
-            if metadata.get("is_raw_source", False):
-                raw_count += 1
-            else:
-                standard_count += 1
-
         analysis["feature_frequency"] = dict(Counter(all_features))
         analysis["session_distribution"] = dict(Counter(session_counts))
-        analysis["camera_distribution"] = dict(Counter(camera_brands))
+        analysis["format_distribution"] = dict(Counter(format_counts))
 
         if file_sizes:
             analysis["avg_file_size_mb"] = sum(file_sizes) / len(file_sizes)
-
-        # Estadísticas específicas RAW
-        analysis["raw_statistics"] = {
-            "raw_files": raw_count,
-            "standard_files": standard_count,
-            "raw_percentage": (
-                (raw_count / len(metadata_mapping)) * 100
-                if len(metadata_mapping) > 0
-                else 0
-            ),
-            "total_raw_cameras": len(set(camera_brands)),
-            "dominant_camera": (
-                Counter(camera_brands).most_common(1)[0]
-                if camera_brands
-                else ["unknown", 0]
-            ),
-        }
 
         return analysis
 
@@ -807,11 +812,6 @@ class DataPreprocessor:
         print(f"   MJ: {len(mj_images)} imágenes")
         print(f"   Real: {len(real_images)} imágenes")
 
-        # Estadísticas RAW en fotos reales (case-insensitive)
-        raw_real_images = [img for img in real_images if "_RAW_" in img.name.upper()]
-        if raw_real_images:
-            print(f"   📸 Real RAW: {len(raw_real_images)} imágenes (máxima calidad)")
-
         # Calcular balance ideal (85% MJ / 15% Real)
         total_available = len(mj_images) + len(real_images)
 
@@ -836,11 +836,9 @@ class DataPreprocessor:
             f"   Real seleccionadas: {actual_real_count} ({actual_real_count/total_available*100:.1f}%)"
         )
 
-        # Seleccionar mejores imágenes (priorizando RAW en reales)
+        # Seleccionar mejores imágenes (por confianza facial si está disponible)
         selected_mj = self.select_best_images(mj_images, actual_mj_count)
-        selected_real = self.select_best_images_prioritize_raw(
-            real_images, actual_real_count
-        )
+        selected_real = self.select_best_images(real_images, actual_real_count)
 
         # Crear directorio de dataset
         dataset_dir.mkdir(parents=True, exist_ok=True)
@@ -867,15 +865,11 @@ class DataPreprocessor:
                 "original_path": str(img_path),
             }
 
-        # Copiar imágenes reales (peso diferenciado por RAW)
+        # Copiar imágenes reales (peso reducido)
         for i, img_path in enumerate(selected_real, 1):
             dst_name = f"{client_id}_real_{i:03d}.png"
             dst_path = dataset_dir / dst_name
             shutil.copy2(img_path, dst_path)
-
-            # Peso especial para RAW (mayor calidad) - case-insensitive
-            is_raw_source = "_RAW_" in img_path.name.upper()
-            weight = 0.5 if is_raw_source else 0.35
 
             # Generar caption para fotos reales
             caption = self.generate_real_caption(client_id, img_path, metadata_dir)
@@ -885,41 +879,26 @@ class DataPreprocessor:
 
             dataset_metadata[dst_name] = {
                 "type": "real",
-                "weight": weight,
+                "weight": 0.35,  # Peso reducido para fotos reales
                 "caption": caption,
                 "original_path": str(img_path),
-                "is_raw_source": is_raw_source,
             }
 
         # Guardar metadata del dataset
-        raw_real_selected = len(
-            [img for img in selected_real if "_RAW_" in img.name.upper()]
-        )
-
         dataset_info = {
             "client_id": client_id,
             "creation_date": datetime.now().isoformat(),
             "total_images": len(dataset_metadata),
             "mj_images": actual_mj_count,
             "real_images": actual_real_count,
-            "real_raw_images": raw_real_selected,
             "balance_ratio": f"{actual_mj_count/len(dataset_metadata)*100:.1f}% MJ / {actual_real_count/len(dataset_metadata)*100:.1f}% Real",
-            "weight_config": {
-                "mj_weight": 1.0,
-                "real_standard_weight": 0.35,
-                "real_raw_weight": 0.5,
-            },
+            "weight_config": {"mj_weight": 1.0, "real_weight": 0.35},
             "recommended_training": {
                 "total_steps": min(3000, len(dataset_metadata) * 25),
                 "batch_size": 1,
                 "learning_rate": 0.0001,
                 "dataset_repeats": max(1, 500 // len(dataset_metadata)),
             },
-            "quality_notes": (
-                f"Incluye {raw_real_selected} imágenes RAW de máxima calidad"
-                if raw_real_selected > 0
-                else "Calidad estándar"
-            ),
         }
 
         # Guardar archivos de configuración
@@ -934,8 +913,6 @@ class DataPreprocessor:
         print(f"\n✅ DATASET LORA PREPARADO:")
         print(f"   Total imágenes: {len(dataset_metadata)}")
         print(f"   Balance: {dataset_info['balance_ratio']}")
-        if raw_real_selected > 0:
-            print(f"   📸 RAW incluidas: {raw_real_selected} (peso: 0.5)")
         print(f"   Captions generados: {len(dataset_metadata)} archivos .txt")
         print(f"   Configuración: {dataset_config_file}")
         print(f"   Metadata: {metadata_file}")
@@ -950,37 +927,6 @@ class DataPreprocessor:
         # Ordenar por tamaño de archivo (proxy de calidad) y tomar las mejores
         sorted_images = sorted(image_list, key=lambda x: x.stat().st_size, reverse=True)
         return sorted_images[:target_count]
-
-    def select_best_images_prioritize_raw(self, image_list, target_count):
-        """Selecciona mejores imágenes priorizando archivos RAW"""
-        if len(image_list) <= target_count:
-            return image_list
-
-        # Separar RAW de estándar (case-insensitive)
-        raw_images = [img for img in image_list if "_RAW_" in img.name.upper()]
-        standard_images = [img for img in image_list if "_RAW_" not in img.name.upper()]
-
-        # Priorizar RAW primero
-        selected = []
-
-        # Tomar todos los RAW posibles (hasta target_count)
-        raw_to_take = min(len(raw_images), target_count)
-        selected.extend(
-            sorted(raw_images, key=lambda x: x.stat().st_size, reverse=True)[
-                :raw_to_take
-            ]
-        )
-
-        # Llenar el resto con estándar
-        remaining_slots = target_count - len(selected)
-        if remaining_slots > 0:
-            selected.extend(
-                sorted(standard_images, key=lambda x: x.stat().st_size, reverse=True)[
-                    :remaining_slots
-                ]
-            )
-
-        return selected
 
     def generate_mj_caption(self, client_id, image_path, metadata_dir):
         """Genera caption rico para imagen MJ usando metadata preservada"""
@@ -1022,13 +968,7 @@ class DataPreprocessor:
         # Cargar metadata de fotos reales
         real_metadata_file = metadata_dir / "real_metadata_mapping.json"
 
-        # Caption base diferenciado por RAW (case-insensitive)
-        is_raw_source = "_RAW_" in image_path.name.upper()
-
-        if is_raw_source:
-            base_caption = f"reference photo of {client_id}, raw maximum quality, natural facial structure, geometric anchor points, detailed facial mapping, professional grade"
-        else:
-            base_caption = f"reference photo of {client_id}, natural facial structure, geometric anchor points, detailed facial mapping"
+        base_caption = f"reference photo of {client_id}, natural facial structure, geometric anchor points, detailed facial mapping"
 
         if real_metadata_file.exists():
             with open(real_metadata_file, "r") as f:
@@ -1038,17 +978,10 @@ class DataPreprocessor:
             for original_name, metadata in real_metadata.items():
                 if original_name in image_path.name:
                     features = metadata.get("detected_features", [])
-                    camera_brand = metadata.get("camera_brand", "unknown")
 
-                    feature_parts = []
                     if features:
-                        feature_parts.append(", ".join(features))
-
-                    if is_raw_source and camera_brand != "unknown":
-                        feature_parts.append(f"{camera_brand} sensor data")
-
-                    if feature_parts:
-                        return f"{base_caption}, {', '.join(feature_parts)}, compatible for face swap technology"
+                        feature_text = ", ".join(features)
+                        return f"{base_caption}, {feature_text}, compatible for face swap technology"
 
         return f"{base_caption}, compatible for face swap technology"
 
