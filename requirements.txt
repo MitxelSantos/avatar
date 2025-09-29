@@ -4,26 +4,26 @@
 
 # ===== CORE DEEP LEARNING FRAMEWORK =====
 # PyTorch con CUDA - INSTALAR PRIMERO
-torch>=2.0.0,<2.3.0
-torchvision>=0.15.0,<0.18.0
-torchaudio>=2.0.0,<2.3.0
+torch>=2.2
+torchvision
+torchaudio
 # Usar: pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu118
 
 # ===== FACE DETECTION Y COMPUTER VISION =====
 # Detección facial robusta
 mtcnn>=0.1.1
 opencv-python>=4.8.0,<4.9.0
-tensorflow>=2.13.0,<2.16.0  # Actualizado para compatibilidad
+tensorflow
 
 # ===== IMAGE PROCESSING CORE =====
 # Procesamiento de imágenes esencial
-Pillow>=10.0.0,<11.0.0  # Actualizado
-numpy>=1.24.0,<1.26.0   # Compatible con TensorFlow
-scikit-image>=0.21.0,<0.23.0
+Pillow
+numpy
+scikit-image
 
 # ===== RAW IMAGE PROCESSING =====
 # Soporte completo para archivos RAW - CRÍTICO
-rawpy>=0.18.0,<0.20.0
+rawpy
 imageio>=2.31.0,<2.33.0  # Actualizado
 imageio-ffmpeg>=0.4.9,<0.5.0
 
@@ -35,7 +35,7 @@ exifread>=3.0.0,<4.0.0
 diffusers>=0.21.0,<0.25.0  # Actualizado para SDXL
 transformers>=4.30.0,<4.36.0  # Actualizado
 accelerate>=0.20.0,<0.25.0     # Actualizado
-safetensors>=0.3.0,<0.5.0      # Actualizado
+safetensors
 
 # ===== OPTIMIZACIONES DE MEMORIA =====
 # Optimizaciones críticas para GPU
@@ -56,7 +56,7 @@ omegaconf>=2.3.0,<2.4.0
 
 # ===== DATA PROCESSING =====
 # Análisis y manipulación de datos
-pandas>=2.0.0,<2.2.0     # Actualizado
+pandas
 datasets>=2.14.0,<2.16.0  # Actualizado
 
 # ===== UTILITIES =====
@@ -73,7 +73,7 @@ jsonschema>=4.17.0,<5.0.0
 # Dependencias de Python actualizadas
 setuptools>=68.0.0,<70.0.0  # Actualizado
 wheel>=0.40.0,<0.42.0       # Actualizado
-pip>=23.0.0,<24.0.0         # Actualizado
+pip
 
 # Utilities esenciales
 einops>=0.6.0,<0.8.0     # Actualizado
@@ -97,8 +97,8 @@ isort>=5.12.0,<6.0.0
 
 # ===== PERFORMANCE OPTIMIZATIONS =====
 # ONNX para inferencia optimizada (opcional)
-onnx>=1.14.0,<1.16.0
-onnxruntime>=1.15.0,<1.17.0
+onnx
+onnxruntime
 
 # ===== DEPENDENCIAS FALTANTES CRÍTICAS =====
 # Estas eran imports faltantes en el código original
