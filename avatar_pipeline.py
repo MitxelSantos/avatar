@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 """
 Avatar Pipeline - Gestión completa de clientes, procesamiento de imágenes y entrenamiento LoRA
-VERSIÓN CORREGIDA: Estructura Kohya_ss automática con formato {repeats}_{client_id}
 """
 
 import os
@@ -27,7 +26,6 @@ except ImportError as e:
     print(f"Error importando módulos: {e}")
     print("Asegúrate de que todos los archivos estén en el mismo directorio")
     sys.exit(1)
-
 
 class AvatarPipeline:
     def __init__(self):
