@@ -1,176 +1,65 @@
-# Avatar Pipeline - Sistema Profesional de Entrenamiento LoRA
-# Dependencias ACTUALIZADAS y CORREGIDAS para máxima compatibilidad
-# OPTIMIZADO para Windows 11, Python 3.10-3.11, CUDA 11.8/12.1
+# Avatar Pipeline - GTX 1650 4GB + Python 3.11
+# PASO CRÍTICO: Instalar PyTorch PRIMERO (antes de este archivo):
+# pip install torch==2.1.2 torchvision==0.16.2 torchaudio==2.1.2 --index-url https://download.pytorch.org/whl/cu118
 
-# ===== CORE DEEP LEARNING FRAMEWORK =====
-# PyTorch con CUDA - INSTALAR PRIMERO
-torch>=2.2
-torchvision
-torchaudio
-# Usar: pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu118
+# FACE DETECTION - CPU only para liberar VRAM
+tensorflow-cpu==2.15.1
+mtcnn==0.1.1
+opencv-python-headless==4.8.1.78
 
-# ===== FACE DETECTION Y COMPUTER VISION =====
-# Detección facial robusta
-mtcnn>=0.1.1
-opencv-python>=4.8.0,<4.9.0
-tensorflow
+# IMAGE PROCESSING
+Pillow==10.0.1
+numpy==1.24.3
+scikit-image==0.22.0
 
-# ===== IMAGE PROCESSING CORE =====
-# Procesamiento de imágenes esencial
-Pillow
-numpy
-scikit-image
+# RAW PROCESSING
+rawpy==0.19.0
+imageio==2.31.6
+imageio-ffmpeg==0.4.9
+exifread==3.0.0
 
-# ===== RAW IMAGE PROCESSING =====
-# Soporte completo para archivos RAW - CRÍTICO
-rawpy
-imageio>=2.31.0,<2.33.0  # Actualizado
-imageio-ffmpeg>=0.4.9,<0.5.0
+# DIFFUSION & LORA
+diffusers==0.25.1
+transformers==4.36.2
+accelerate==0.25.0
+safetensors==0.4.1
 
-# Procesamiento avanzado de imágenes RAW
-exifread>=3.0.0,<4.0.0
+# XFORMERS - CRÍTICO para 4GB VRAM
+xformers==0.0.23.post1
 
-# ===== DIFFUSION Y LORA TRAINING =====
-# Ecosystem de Diffusers - ACTUALIZADO
-diffusers>=0.21.0,<0.25.0  # Actualizado para SDXL
-transformers>=4.30.0,<4.36.0  # Actualizado
-accelerate>=0.20.0,<0.25.0     # Actualizado
-safetensors
+# BITSANDBYTES - 8-bit optimizations
+bitsandbytes==0.41.1
 
-# ===== OPTIMIZACIONES DE MEMORIA =====
-# Optimizaciones críticas para GPU
-xformers>=0.0.20,<0.0.23  # Actualizado
-bitsandbytes>=0.41.0,<0.42.0  # Actualizado para Windows
+# OPTIMIZERS
+dadaptation==3.1
 
-# ===== OPTIMIZERS AVANZADOS =====
-# Optimizers de última generación
-dadaptation>=3.1,<4.0
-prodigyopt>=1.0,<2.0
-lion-pytorch>=0.0.6,<0.1.0
+# TRAINING UTILITIES
+tensorboard==2.15.1
+omegaconf==2.3.0
 
-# ===== TRAINING UTILITIES =====
-# Herramientas de entrenamiento
-tensorboard>=2.13.0,<2.16.0  # Actualizado
-wandb>=0.15.0,<0.17.0         # Actualizado
-omegaconf>=2.3.0,<2.4.0
+# DATA PROCESSING
+pandas==2.1.4
+datasets==2.16.1
 
-# ===== DATA PROCESSING =====
-# Análisis y manipulación de datos
-pandas
-datasets>=2.14.0,<2.16.0  # Actualizado
+# UTILITIES
+tqdm==4.66.1
+rich==13.7.0
+pyyaml==6.0.1
+toml==0.10.2
+jsonschema==4.20.0
+einops==0.7.0
+imagesize==1.4.1
+voluptuous==0.13.1
 
-# ===== UTILITIES =====
-# Manejo de archivos y paths
-tqdm>=4.65.0,<4.67.0
-rich>=13.0.0,<14.0.0  # Actualizado
+# PYTHON CORE
+setuptools==69.0.3
+wheel==0.42.0
 
-# Configuración y serialización
-pyyaml>=6.0,<7.0
-toml>=0.10.2,<0.11.0
-jsonschema>=4.17.0,<5.0.0
+# WINDOWS
+pywin32==306; sys_platform == "win32"
+colorama==0.4.6; sys_platform == "win32"
 
-# ===== PYTHON CORE DEPENDENCIES =====
-# Dependencias de Python actualizadas
-setuptools>=68.0.0,<70.0.0  # Actualizado
-wheel>=0.40.0,<0.42.0       # Actualizado
-pip
-
-# Utilities esenciales
-einops>=0.6.0,<0.8.0     # Actualizado
-imagesize>=1.4.0,<2.0.0
-voluptuous>=0.13.0,<0.14.0
-
-# ===== PLATFORM ESPECÍFICO =====
-# Windows específico - CORREGIDO
-pywin32>=306; sys_platform == "win32"  # Actualizado
-colorama>=0.4.6; sys_platform == "win32"
-
-# GUI para diálogos de archivos
-# tkinter viene con Python, no necesita instalación
-
-# ===== DEVELOPMENT Y TESTING =====
-# Herramientas de desarrollo (opcionales)
-pytest>=7.4.0,<8.0.0
-black>=23.0.0,<24.0.0
-flake8>=6.0.0,<7.0.0
-isort>=5.12.0,<6.0.0
-
-# ===== PERFORMANCE OPTIMIZATIONS =====
-# ONNX para inferencia optimizada (opcional)
-onnx
-onnxruntime
-
-# ===== DEPENDENCIAS FALTANTES CRÍTICAS =====
-# Estas eran imports faltantes en el código original
-
-# Para utils.py y logging
-psutil>=5.9.0,<6.0.0  # Para monitoreo de sistema
-
-# Para manejo de archivos mejorado
-pathlib2>=2.3.7; python_version < "3.4"  # Rara vez necesario en Python 3.10+
-
-# Para datetime y manejo de tiempo
-python-dateutil>=2.8.0,<3.0.0
-
-# Para subprocess y encoding mejorado
-charset-normalizer>=3.2.0,<4.0.0
-
-# ===== NOTAS DE INSTALACIÓN =====
-# ORDEN RECOMENDADO DE INSTALACIÓN:
-# 
-# 1. Crear entorno virtual:
-#    python -m venv .venv
-#    .venv\Scripts\activate  # Windows
-#    source .venv/bin/activate  # Linux/macOS
-#
-# 2. Actualizar pip:
-#    python -m pip install --upgrade pip setuptools wheel
-#
-# 3. Instalar PyTorch CON CUDA (CRÍTICO - HACER PRIMERO):
-#    pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu118
-#    # O para CUDA 12.1:
-#    # pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121
-#
-# 4. Instalar dependencias principales:
-#    pip install -r requirements.txt
-#
-# 5. Verificar instalación:
-#    python -c "import torch; print(f'CUDA disponible: {torch.cuda.is_available()}')"
-
-# ===== RESOLUCIÓN DE PROBLEMAS =====
-# 
-# Si hay conflictos de versiones:
-# 1. pip uninstall torch torchvision torchaudio
-# 2. pip cache purge
-# 3. pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu118
-# 4. pip install -r requirements.txt
-#
-# Si rawpy falla en Windows:
-# 1. Instalar Visual C++ Redistributable
-# 2. O usar: conda install rawpy -c conda-forge
-#
-# Si hay errores de encoding:
-# 1. Configurar: set PYTHONIOENCODING=utf-8
-# 2. O agregar al código: os.environ['PYTHONIOENCODING'] = 'utf-8'
-
-# ===== HARDWARE SOPORTADO =====
-# Mínimo: GTX 1650 4GB, 16GB RAM, Python 3.10
-# Recomendado: RTX 3060 8GB+, 32GB RAM, Python 3.11
-# Optimal: RTX 4060 8GB+, 32GB RAM, SSD, Python 3.11
-
-# ===== VERSIONES TESTEADAS =====
-# ✅ Windows 11 + Python 3.11 + CUDA 11.8
-# ✅ Windows 10 + Python 3.10 + CUDA 11.8  
-# ✅ RTX 3050 6GB / RTX 3060 8GB / RTX 4060 8GB
-# ✅ Kohya_ss commit 1470cb8 (Enero 2025)
-# ✅ SDXL base model con LoRA training
-# ✅ Archivos RAW (.NEF, .CR2, .ARW, .DNG, .RAF, .ORF)
-
-# ===== CHANGELOG v3.0 =====
-# - Actualizadas todas las versiones para compatibilidad 2024-2025
-# - Corregidos conflictos de versiones TensorFlow/PyTorch
-# - Añadidas dependencias faltantes (psutil, charset-normalizer)
-# - Optimizado para Kohya_ss más reciente
-# - Soporte mejorado para Windows 11
-# - Rangos de versiones más estrictos para estabilidad
-# - Documentación mejorada para resolución de problemas
+# PERFORMANCE
+psutil==5.9.6
+python-dateutil==2.8.2
+charset-normalizer==3.3.2

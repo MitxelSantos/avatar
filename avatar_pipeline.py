@@ -1,11 +1,6 @@
 #!/usr/bin/env python3
 """
-Avatar Pipeline - VERSIÓN CORREGIDA CON ESTRUCTURA KOHYA_SS
-FIXES APLICADOS:
-- Estructura de directorios compatible con Kohya_ss desde el setup
-- Imports corregidos para módulos faltantes
-- Navegación correcta al crear cliente
-- Mejor detección e instrucciones para CUDA
+Avatar Pipeline - Gestión completa de clientes, procesamiento de imágenes y entrenamiento LoRA
 """
 
 import os
@@ -22,7 +17,7 @@ os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3"
 os.environ["TF_ENABLE_ONEDNN_OPTS"] = "0"
 warnings.filterwarnings("ignore")
 
-# Imports de módulos especializados - CON MANEJO DE ERRORES
+# Imports de módulos especializados
 try:
     from image_processor import FaceProcessor
     from data_preprocessor import DataPreprocessor
@@ -89,10 +84,10 @@ class AvatarPipeline:
 
     def show_header(self):
         print("=" * 70)
-        print("🎯 AVATAR PIPELINE")
+        print("🎯 AVATAR CREATOR APP")
         print("=" * 70)
         if self.current_client:
-            print(f"📋 Cliente Actual: {self.current_client}")
+            print(f"📋 Avatar Actual: {self.current_client}")
             print("-" * 70)
 
     def wait_input(self, msg="Presiona Enter para continuar..."):
@@ -207,32 +202,202 @@ class AvatarPipeline:
         print("\n🏗️ SETUP INICIAL DEL PROYECTO")
         print("-" * 40)
 
-        # Crear directorios
+        # 1. Verificar Python
+        print("\n[1/6] Verificando Python...")
+        py_version = sys.version_info
+        if py_version.major == 3 and py_version.minor == 11:
+            print(f"✅ Python {py_version.major}.{py_version.minor}.{py_version.micro}")
+        elif py_version.major == 3 and py_version.minor in [10, 12]:
+            print(f"⚠️  Python {py_version.major}.{py_version.minor} detectado")
+            print("   Recomendado: Python 3.11")
+        else:
+            print(f"❌ Python {py_version.major}.{py_version.minor} NO compatible")
+            print("   REQUERIDO: Python 3.11")
+            self.wait_input()
+            return
+
+        # 2. Verificar CUDA
+        print("\n[2/6] Verificando CUDA...")
+        cuda_ok = self.check_cuda_installation()
+        if not cuda_ok:
+            print("\n❌ CUDA no disponible")
+            print("💡 Instalar PyTorch con CUDA:")
+            print(
+                "   pip install torch==2.1.2 torchvision==0.16.2 torchaudio==2.1.2 --index-url https://download.pytorch.org/whl/cu118"
+            )
+
+            install_pytorch = (
+                input("\n¿Instalar PyTorch ahora? (s/n): ").lower().strip()
+            )
+            if install_pytorch.startswith("s"):
+                print("\n📦 Instalando PyTorch con CUDA 11.8...")
+                try:
+                    import subprocess
+
+                    result = subprocess.run(
+                        [
+                            sys.executable,
+                            "-m",
+                            "pip",
+                            "install",
+                            "torch==2.1.2",
+                            "torchvision==0.16.2",
+                            "torchaudio==2.1.2",
+                            "--index-url",
+                            "https://download.pytorch.org/whl/cu118",
+                        ],
+                        capture_output=True,
+                        text=True,
+                    )
+
+                    if result.returncode == 0:
+                        print("✅ PyTorch instalado")
+                        # Verificar nuevamente
+                        import importlib
+
+                        if "torch" in sys.modules:
+                            importlib.reload(sys.modules["torch"])
+                        cuda_ok = self.check_cuda_installation()
+                    else:
+                        print(f"❌ Error: {result.stderr}")
+                except Exception as e:
+                    print(f"❌ Error instalando PyTorch: {e}")
+
+        # 3. Verificar/Instalar requirements
+        print("\n[3/6] Verificando dependencias...")
+        requirements_file = Path("requirements.txt")
+
+        if requirements_file.exists():
+            print("📄 requirements.txt encontrado")
+
+            # Verificar si ya están instaladas
+            try:
+                import diffusers
+                import transformers
+                import accelerate
+
+                print("✅ Dependencias principales ya instaladas")
+                install_deps = (
+                    input("\n¿Reinstalar dependencias? (s/n): ").lower().strip()
+                )
+            except ImportError:
+                print("⚠️  Dependencias faltantes")
+                install_deps = "s"
+
+            if install_deps.startswith("s"):
+                print("\n📦 Instalando dependencias (puede tomar 10-15 minutos)...")
+                try:
+                    import subprocess
+
+                    result = subprocess.run(
+                        [
+                            sys.executable,
+                            "-m",
+                            "pip",
+                            "install",
+                            "-r",
+                            "requirements.txt",
+                        ],
+                        capture_output=True,
+                        text=True,
+                    )
+
+                    if result.returncode == 0:
+                        print("✅ Dependencias instaladas")
+                    else:
+                        print(f"⚠️  Algunos errores (puede ser normal):")
+                        print(result.stderr[:500])
+                except Exception as e:
+                    print(f"❌ Error: {e}")
+        else:
+            print("❌ requirements.txt NO encontrado")
+
+        # 4. Crear directorios
+        print("\n[4/6] Creando estructura de directorios...")
         for dir_path in [self.clients_dir, self.training_dir]:
             dir_path.mkdir(exist_ok=True)
-            print(f"✅ Creado: {dir_path}")
+            print(f"✅ {dir_path}")
 
-        # Mover lora-clients si existe
+        # 5. Mover lora-clients si existe
+        print("\n[5/6] Migrando archivos antiguos...")
         old_clients = self.base_dir / "lora-clients"
         if old_clients.exists():
-            print("\n📁 Moviendo lora-clients a clients...")
+            print(f"📁 Moviendo lora-clients a clients...")
             for item in old_clients.iterdir():
                 dst = self.clients_dir / item.name
                 if not dst.exists():
                     shutil.move(str(item), str(dst))
-                    print(f"  ✅ Movido: {item.name}")
+                    print(f"  ✅ {item.name}")
             shutil.rmtree(old_clients)
+            print("✅ Migración completada")
+        else:
+            print("✅ No hay archivos para migrar")
 
-        print("\n✅ Setup completado!")
-        print("📋 Pasos siguientes:")
-        print("   1. Crear un cliente nuevo")
-        print("   2. Cargar imágenes MJ con metadata completa")
-        print("   3. Procesar para entrenamiento LoRA de máxima calidad")
+        # 6. Verificación final
+        print("\n[6/6] Verificación final...")
+
+        checks = {
+            "PyTorch": False,
+            "CUDA": False,
+            "Diffusers": False,
+            "xFormers": False,
+            "MTCNN": False,
+        }
+
+        try:
+            import torch
+
+            checks["PyTorch"] = True
+            checks["CUDA"] = torch.cuda.is_available()
+        except:
+            pass
+
+        try:
+            import diffusers
+
+            checks["Diffusers"] = True
+        except:
+            pass
+
+        try:
+            import xformers
+
+            checks["xFormers"] = True
+        except:
+            pass
+
+        try:
+            from mtcnn import MTCNN
+
+            checks["MTCNN"] = True
+        except:
+            pass
+
+        print("\n📊 ESTADO DEL SISTEMA:")
+        for component, status in checks.items():
+            icon = "✅" if status else "❌"
+            print(f"   {icon} {component}")
+
+        all_ok = all(checks.values())
+
+        print("\n" + "=" * 40)
+        if all_ok:
+            print("✅ SETUP COMPLETADO EXITOSAMENTE")
+            print("\n💡 Próximos pasos:")
+            print("   1. Crear un cliente nuevo")
+            print("   2. Cargar imágenes MJ/reales")
+            print("   3. Procesar y entrenar")
+        else:
+            print("⚠️ SETUP COMPLETADO CON ADVERTENCIAS")
+            print("\n💡 Componentes faltantes:")
+            for component, status in checks.items():
+                if not status:
+                    print(f"   ❌ {component}")
+            print("\n   Instala manualmente los componentes faltantes")
 
         self.wait_input()
 
     def create_client(self):
-        """VERSIÓN CORREGIDA: Navega automáticamente al menú de operaciones + ESTRUCTURA KOHYA_SS"""
         self.clear_screen()
         self.show_header()
 
@@ -258,7 +423,7 @@ class AvatarPipeline:
             "raw_mj",  # Imágenes MJ originales
             "raw_real",  # Fotos reales originales
             "processed",  # Imágenes procesadas 1024x1024
-            "training_data",  # ← NUEVO: Directorio padre para Kohya_ss
+            "training_data",  # Directorio padre para Kohya_ss
             "rejected",  # Imágenes rechazadas por QC
             "metadata",  # Logs, CSVs, configuraciones
             "training/logs",  # Logs de entrenamiento (nested)
@@ -299,9 +464,8 @@ class AvatarPipeline:
 
         print(f"\n✅ Cliente '{client_id}' creado exitosamente!")
         print(f"📋 Configuración guardada en: {config_file}")
-        print(f"🔧 Estructura compatible con Kohya_ss creada")
 
-        # FIX: Preguntar si seleccionarlo Y navegar automáticamente
+        # Preguntar si seleccionarlo Y navegar automáticamente
         select_client = (
             input("\n¿Seleccionar este cliente para trabajar? (s/n): ").lower().strip()
         )
@@ -313,7 +477,7 @@ class AvatarPipeline:
 
             time.sleep(1)  # Pausa breve para que el usuario vea el mensaje
 
-            # CORRECCIÓN: Ir directamente al menú de operaciones
+            # Ir directamente al menú de operaciones
             self.run_client_operations()
             return "operations"  # Señal especial para salir del bucle de gestión
         else:
@@ -480,14 +644,14 @@ class AvatarPipeline:
             )
             print(f"   Entrenamientos: {len(config.get('training_history', []))}")
 
-            # NUEVO: Mostrar estructura Kohya_ss
+            # Mostrar estructura Kohya_ss
             kohya_info = config.get("kohya_structure", {})
             if kohya_info:
                 print(
                     f"   Estructura Kohya_ss: {kohya_info.get('structure_version', 'N/A')}"
                 )
 
-        # Contar archivos por directorio - ACTUALIZADO PARA NUEVA ESTRUCTURA
+        # Contar archivos por directorio
         subdirs = [
             "raw_mj",
             "raw_real",

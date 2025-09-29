@@ -2,6 +2,7 @@
 """
 config.py - Configuración centralizada del sistema Avatar Pipeline
 Versión 3.0 - Escalable y modular
+MODIFICADO: Soporte para GTX 1650 4GB
 """
 
 import os
@@ -94,8 +95,32 @@ class AvatarPipelineConfig:
         }
 
     def _init_gpu_profiles(self) -> Dict[str, GPUProfile]:
-        """Inicializa perfiles de GPU optimizados"""
+        """Inicializa perfiles de GPU optimizados - INCLUYE GTX 1650"""
         return {
+            "gtx_1650": GPUProfile(
+                name="GTX 1650 4GB (Low-End Optimized)",
+                vram_gb_min=3.5,
+                vram_gb_max=4.5,
+                network_dim=32,
+                network_alpha=16,
+                batch_size=1,
+                resolution=768,
+                optimizer="AdamW8bit",
+                conv_lora=False,
+                gradient_accumulation_steps=8,
+                steps_per_hour_estimate=175,
+                memory_optimizations={
+                    "mixed_precision": "fp16",
+                    "gradient_checkpointing": True,
+                    "cache_latents": True,
+                    "cache_text_encoder_outputs": True,
+                    "lowvram": True,
+                    "medvram": True,
+                    "xformers_memory_efficient_attention": True,
+                    "attention_slicing": True,
+                    "cpu_offload": True,
+                }
+            ),
             "rtx_3050": GPUProfile(
                 name="RTX 3050 8GB",
                 vram_gb_min=7.5,
@@ -243,8 +268,32 @@ class AvatarPipelineConfig:
         }
 
     def _init_training_presets(self) -> Dict[str, Dict[str, Any]]:
-        """Inicializa presets de entrenamiento"""
+        """Inicializa presets de entrenamiento - INCLUYE PRESETS GTX 1650"""
         return {
+            "gtx1650_quick": {
+                "name": "GTX 1650 - Rápido (6-8 horas)",
+                "max_train_steps": 1000,
+                "learning_rate": 0.00015,
+                "dataset_repeats_multiplier": 250,
+                "save_every_n_steps": 250,
+                "description": "Para pruebas en GTX 1650"
+            },
+            "gtx1650_balanced": {
+                "name": "GTX 1650 - Equilibrado (10-14 horas)",
+                "max_train_steps": 1500,
+                "learning_rate": 0.00012,
+                "dataset_repeats_multiplier": 200,
+                "save_every_n_steps": 300,
+                "description": "Balance entre calidad y tiempo para GTX 1650"
+            },
+            "gtx1650_quality": {
+                "name": "GTX 1650 - Alta Calidad (14-18 horas)",
+                "max_train_steps": 2000,
+                "learning_rate": 0.0001,
+                "dataset_repeats_multiplier": 150,
+                "save_every_n_steps": 400,
+                "description": "Máxima calidad posible en GTX 1650"
+            },
             "quick": {
                 "name": "Entrenamiento Rápido",
                 "max_train_steps": 1500,
@@ -280,7 +329,7 @@ class AvatarPipelineConfig:
         }
 
     def detect_gpu_profile(self) -> Optional[GPUProfile]:
-        """Detecta automáticamente el perfil de GPU"""
+        """Detecta automáticamente el perfil de GPU - MODIFICADO PARA GTX 1650"""
         try:
             import torch
             if not torch.cuda.is_available():
@@ -289,7 +338,15 @@ class AvatarPipelineConfig:
             vram_gb = torch.cuda.get_device_properties(0).total_memory / (1024**3)
             gpu_name = torch.cuda.get_device_name(0).lower()
             
-            # Detección específica por nombre
+            # PRIORIDAD 1: Detección específica GTX 1650
+            if "1650" in gpu_name and vram_gb <= 4.5:
+                print(f"⚠️  GTX 1650 detectada - Optimizaciones extremas activadas")
+                print(f"   VRAM: {vram_gb:.1f}GB")
+                print(f"   Resolution limitada a 768x768")
+                print(f"   Network dim limitado a 32")
+                return self.gpu_profiles["gtx_1650"]
+            
+            # PRIORIDAD 2: Detección específica por nombre
             if "3050" in gpu_name and vram_gb > 7:
                 return self.gpu_profiles["rtx_3050"]
             elif "3060" in gpu_name:
@@ -299,14 +356,14 @@ class AvatarPipelineConfig:
             elif "4060" in gpu_name:
                 return self.gpu_profiles["rtx_4060"]
             
-            # Detección por VRAM
-            for profile_key, profile in self.gpu_profiles.items():
-                if profile.vram_gb_min <= vram_gb <= profile.vram_gb_max:
-                    return profile
-            
-            # Fallback según VRAM
+            # PRIORIDAD 3: Detección por VRAM
             if vram_gb <= 5.0:
-                return self.gpu_profiles["low_end"]
+                # GPU low-end
+                if vram_gb <= 4.5:
+                    # Probablemente GTX 1650 o similar
+                    return self.gpu_profiles.get("gtx_1650", self.gpu_profiles["low_end"])
+                else:
+                    return self.gpu_profiles["low_end"]
             elif vram_gb >= 11.0:
                 return self.gpu_profiles["high_end"]
             else:

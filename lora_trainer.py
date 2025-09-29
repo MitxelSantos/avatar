@@ -7,6 +7,7 @@ FIXES APLICADOS:
 - Manejo de encoding UTF-8 para Windows
 - Optimizado para RTX 8GB VRAM
 - Compatibilidad completa con Kohya_ss actual
+- ESTRUCTURA KOHYA_SS: training_data/client_id/ detectada correctamente
 """
 
 import os
@@ -60,7 +61,14 @@ class LoRATrainer:
         self.logger.info(f"Configurando entrenamiento LoRA para cliente: {client_id}")
 
         client_path = clients_dir / client_id
-        dataset_dir = client_path / "dataset_lora"
+
+        # CORREGIDO: Buscar dataset en estructura Kohya_ss
+        training_data_subdir = client_path / "training_data" / client_id
+        dataset_dir = (
+            training_data_subdir
+            if training_data_subdir.exists()
+            else client_path / "dataset_lora"
+        )
 
         print(f"\n⚙️ CONFIGURANDO ENTRENAMIENTO LORA")
         print(f"Cliente: {client_id}")
@@ -142,18 +150,36 @@ class LoRATrainer:
             print(f"   ❌ Archivo de configuración NO encontrado")
             validation_results["config"] = False
 
-        # 1.2 Verificar dataset
+        # 1.2 Verificar dataset - ESTRUCTURA KOHYA_SS CORREGIDA
         print(f"📊 Verificando dataset...")
-        dataset_dir = client_path / "dataset_lora"
-        if dataset_dir.exists():
+
+        # CORREGIDO: Buscar en estructura Kohya_ss
+        training_data_subdir = client_path / "training_data" / client_id
+        dataset_lora_dir = client_path / "dataset_lora"
+
+        # Determinar qué directorio usar
+        if training_data_subdir.exists():
+            dataset_dir = training_data_subdir
             dataset_images = list(dataset_dir.glob("*.png"))
             dataset_captions = list(dataset_dir.glob("*.txt"))
             print(
                 f"   ✅ Dataset encontrado: {len(dataset_images)} imágenes, {len(dataset_captions)} captions"
             )
+            print(f"   📁 Ubicación: {dataset_dir}")
+            validation_results["dataset"] = len(dataset_images) >= 20
+        elif dataset_lora_dir.exists():
+            dataset_dir = dataset_lora_dir
+            dataset_images = list(dataset_dir.glob("*.png"))
+            dataset_captions = list(dataset_dir.glob("*.txt"))
+            print(
+                f"   ✅ Dataset encontrado: {len(dataset_images)} imágenes (estructura antigua)"
+            )
+            print(f"   📁 Ubicación: {dataset_dir}")
             validation_results["dataset"] = len(dataset_images) >= 20
         else:
             print(f"   ❌ Dataset NO encontrado")
+            print(f"   Buscado en: {training_data_subdir}")
+            print(f"   Y en: {dataset_lora_dir}")
             validation_results["dataset"] = False
 
         # 1.3 Verificar PyTorch y CUDA
@@ -323,7 +349,14 @@ class LoRATrainer:
             # Construir comando de entrenamiento
             print(f"🔧 Generando comando de entrenamiento...")
 
-            dataset_dir = client_path / "dataset_lora"
+            # CORREGIDO: Buscar dataset en estructura Kohya_ss
+            training_data_subdir = client_path / "training_data" / client_id
+            dataset_dir = (
+                training_data_subdir
+                if training_data_subdir.exists()
+                else client_path / "dataset_lora"
+            )
+
             cmd = self._build_training_command(
                 config, dataset_dir, models_dir, logs_dir
             )
@@ -402,23 +435,27 @@ class LoRATrainer:
             save_config = config["save_config"]
 
             # USAR ESTRUCTURA KOHYA_SS EXISTENTE
-            # dataset_dir apunta a clients/client_id/dataset_lora (estructura antigua)
-            # Pero ahora usamos clients/client_id/training_data (estructura nueva)
-
-            client_path = dataset_dir.parent  # clients/client_id/
+            client_path = (
+                dataset_dir.parent
+                if "training_data" in str(dataset_dir)
+                else dataset_dir.parent
+            )
             client_id = config["client_id"]
 
             # RUTA CORRECTA PARA KOHYA_SS
             training_data_parent = client_path / "training_data"
             training_data_subdir = training_data_parent / client_id
 
-            # Verificar que la estructura existe
+            # Si no existe estructura Kohya, usar antigua
             if not training_data_subdir.exists():
-                self.logger.error(
-                    f"Estructura Kohya_ss no encontrada: {training_data_subdir}"
-                )
-                self.logger.info("Ejecuta 'Preparar dataset LoRA' primero")
-                return []
+                # Fallback a estructura antigua
+                if (client_path / "dataset_lora").exists():
+                    training_data_parent = client_path / "dataset_lora"
+                    training_data_subdir = training_data_parent
+                    self.logger.warning("Usando estructura antigua dataset_lora/")
+                else:
+                    self.logger.error(f"No se encontró dataset en ninguna ubicación")
+                    return []
 
             # Verificar que hay imágenes
             dataset_images = list(training_data_subdir.glob("*.png"))
@@ -428,7 +465,7 @@ class LoRATrainer:
                 )
                 return []
 
-            self.logger.info(f"Usando estructura Kohya_ss: {training_data_parent}")
+            self.logger.info(f"Usando estructura: {training_data_parent}")
             self.logger.info(f"Imágenes encontradas: {len(dataset_images)}")
 
             # COMANDO OPTIMIZADO PARA RTX 8GB
@@ -454,9 +491,9 @@ class LoRATrainer:
                 "--network_module",
                 network_config["network_module"],
                 "--network_dim",
-                str(network_config["network_dim"]),  # 128 para RTX 8GB
+                str(network_config["network_dim"]),
                 "--network_alpha",
-                str(network_config["network_alpha"]),  # 64 para RTX 8GB
+                str(network_config["network_alpha"]),
                 # Entrenamiento - ESENCIALES
                 "--max_train_steps",
                 str(training_config["max_train_steps"]),
@@ -503,7 +540,6 @@ class LoRATrainer:
                 # Optimizaciones básicas para RTX 8GB
                 "--gradient_checkpointing",
                 "--cache_latents",
-                # OMITIDO: "--cache_text_encoder_outputs" - causaba error
             ]
 
             # ARGUMENTOS OPCIONALES SEGUROS
@@ -558,17 +594,8 @@ class LoRATrainer:
             # Agregar argumentos opcionales
             cmd.extend(optional_args)
 
-            # OMITIR ARGUMENTOS PROBLEMÁTICOS que causaban errores:
-            # --lowvram          (causaba error)
-            # --medvram          (causaba error)
-            # --weight_decay     (formato incorrecto)
-            # --cache_text_encoder_outputs (no soportado)
-
             self.logger.info(f"Comando Kohya_ss generado: {len(cmd)} argumentos")
-            self.logger.info(f"Optimizado para RTX 8GB sin argumentos problemáticos")
-            self.logger.info(
-                f"Estructura de datos verificada: {len(dataset_images)} imágenes"
-            )
+            self.logger.info(f"Dataset verificado: {len(dataset_images)} imágenes")
 
             return cmd
 
@@ -751,8 +778,25 @@ class LoRATrainer:
         input("Presiona Enter para continuar...")
 
     def _validate_dataset(self, dataset_dir: Path) -> bool:
-        """Valida que el dataset esté listo"""
-        if not dataset_dir.exists():
+        """Valida que el dataset esté listo - ESTRUCTURA KOHYA_SS"""
+        # NUEVO: Buscar en estructura Kohya_ss
+        client_path = (
+            dataset_dir.parent
+            if "training_data" in str(dataset_dir)
+            else dataset_dir.parent
+        )
+        client_id = (
+            client_path.name
+            if "training_data" not in str(dataset_dir)
+            else dataset_dir.name
+        )
+        training_data_subdir = client_path / "training_data" / client_id
+
+        # Verificar estructura nueva primero
+        if training_data_subdir.exists():
+            dataset_dir = training_data_subdir
+            self.logger.info(f"Usando estructura Kohya_ss: {dataset_dir}")
+        elif not dataset_dir.exists():
             self.logger.error("Dataset no encontrado")
             print("❌ No hay dataset procesado. Prepara primero el dataset LoRA.")
             input("Presiona Enter para continuar...")
@@ -772,13 +816,34 @@ class LoRATrainer:
         return True
 
     def _analyze_dataset(self, dataset_dir: Path) -> Optional[Dict[str, Any]]:
-        """Analiza el dataset y retorna información detallada"""
+        """Analiza el dataset y retorna información detallada - ESTRUCTURA KOHYA_SS"""
         try:
+            # NUEVO: Buscar en estructura Kohya_ss
+            client_path = (
+                dataset_dir.parent
+                if "training_data" in str(dataset_dir)
+                else dataset_dir.parent
+            )
+            client_id = (
+                client_path.name
+                if "training_data" not in str(dataset_dir)
+                else dataset_dir.name
+            )
+            training_data_subdir = client_path / "training_data" / client_id
+
+            if training_data_subdir.exists():
+                dataset_dir = training_data_subdir
+                self.logger.info(f"Analizando estructura Kohya_ss: {dataset_dir}")
+
             all_images = list(dataset_dir.glob("*.png"))
             mj_images = [img for img in all_images if "_mj_" in img.name]
             real_images = [img for img in all_images if "_real_" in img.name]
 
-            config_file = dataset_dir / "dataset_config.json"
+            # Buscar config en metadata
+            config_file = client_path / "metadata" / "lora_dataset_config_kohya.json"
+            if not config_file.exists():
+                config_file = dataset_dir / "dataset_config.json"
+
             dataset_config = load_json_safe(config_file, {}, self.logger)
 
             info = {
@@ -848,7 +913,11 @@ class LoRATrainer:
             preset_info["recommended"] = False
 
             if self.detected_gpu_profile:
-                if (
+                # Recomendar presets GTX 1650 si detectada
+                if "1650" in self.detected_gpu_profile.name.lower():
+                    if preset_key.startswith("gtx1650"):
+                        preset_info["recommended"] = preset_key == "gtx1650_balanced"
+                elif (
                     preset_key == "balanced"
                     and "3050" in self.detected_gpu_profile.name.lower()
                 ):
