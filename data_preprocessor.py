@@ -1029,3 +1029,208 @@ class DataPreprocessor:
         """Guarda configuración del cliente"""
         config_file = client_path / "metadata" / "client_config.json"
         save_json_safe(config, config_file, self.logger)
+
+    def prepare_lora_dataset_kohya(self, client_id: str, clients_dir: Path) -> bool:
+        """
+        MÉTODO NUEVO: Prepara dataset final para LoRA con estructura KOHYA_SS
+        - Normal (ambas): 90% MJ / 10% Real
+        - Solo MJ: 100% MJ
+        - Avatar real: 70% Real / 30% MJ
+        - ESTRUCTURA: training_data/client_id/images + captions
+        """
+        client_path = clients_dir / client_id
+        processed_dir = client_path / "processed"
+
+        # NUEVA ESTRUCTURA KOHYA_SS
+        training_data_parent = client_path / "training_data"
+        training_data_subdir = (
+            training_data_parent / client_id
+        )  # ← Subdirectorio específico
+        metadata_dir = client_path / "metadata"
+
+        self.logger.info(
+            f"Preparando dataset LoRA con estructura Kohya_ss para: {client_id}"
+        )
+
+        if not processed_dir.exists():
+            self.logger.error(
+                "No hay imágenes procesadas. Ejecuta primero el procesamiento facial."
+            )
+            return False
+
+        # Obtener imágenes procesadas por tipo
+        processed_images = list(processed_dir.glob("*.png"))
+
+        if not processed_images:
+            self.logger.error("No hay imágenes procesadas disponibles")
+            return False
+
+        # Separar por tipo (MJ vs Real)
+        mj_images = [img for img in processed_images if "_mj_" in img.name]
+        real_images = [img for img in processed_images if "_real_" in img.name]
+
+        self.logger.info(f"Imágenes disponibles:")
+        self.logger.info(f"  MJ: {len(mj_images)}")
+        self.logger.info(f"  Real: {len(real_images)}")
+        self.logger.info(f"  Total: {len(processed_images)}")
+
+        # Determinar tipo de avatar y distribución usando configuración
+        avatar_type, distribution = self._determine_avatar_type_and_distribution(
+            len(mj_images), len(real_images)
+        )
+
+        self.logger.info(f"Análisis de distribución:")
+        self.logger.info(f"  Tipo de avatar: {avatar_type}")
+        self.logger.info(f"  Distribución objetivo: {distribution['description']}")
+
+        # Calcular cantidades según distribución
+        total_available = len(mj_images) + len(real_images)
+
+        if total_available < 30:
+            self.logger.warning(
+                f"Pocas imágenes disponibles ({total_available}). Recomendado mínimo: 50"
+            )
+
+        # Calcular distribución
+        target_mj_count, target_real_count = self._calculate_distribution(
+            len(mj_images), len(real_images), distribution, total_available
+        )
+
+        # Ajustar si no hay suficientes de algún tipo
+        actual_mj_count = min(len(mj_images), target_mj_count)
+        actual_real_count = min(len(real_images), target_real_count)
+
+        self.logger.info(f"Distribución final:")
+        self.logger.info(
+            f"  MJ seleccionadas: {actual_mj_count} ({actual_mj_count/(actual_mj_count+actual_real_count)*100:.1f}%)"
+        )
+        self.logger.info(
+            f"  Real seleccionadas: {actual_real_count} ({actual_real_count/(actual_mj_count+actual_real_count)*100:.1f}%)"
+        )
+
+        # Seleccionar mejores imágenes
+        selected_mj = self._select_best_images(mj_images, actual_mj_count)
+        selected_real = self._select_best_images(real_images, actual_real_count)
+
+        # CREAR ESTRUCTURA DE DIRECTORIOS KOHYA_SS
+        training_data_subdir.mkdir(parents=True, exist_ok=True)
+        print(f"🏗️ Creando estructura Kohya_ss: {training_data_subdir}")
+
+        # Configurar pesos según tipo de avatar
+        weights = self._get_weights_for_avatar_type(avatar_type)
+
+        # Procesar con tracker de progreso
+        dataset_metadata = {}
+        total_to_process = len(selected_mj) + len(selected_real)
+        tracker = ProgressTracker(total_to_process, "Preparando dataset LoRA Kohya_ss")
+
+        # Copiar imágenes MJ A LA ESTRUCTURA KOHYA_SS
+        for i, img_path in enumerate(selected_mj, 1):
+            dst_name = f"{client_id}_mj_{i:03d}.png"
+            dst_path = training_data_subdir / dst_name  # ← NUEVA UBICACIÓN
+
+            if safe_copy_file(img_path, dst_path, self.logger):
+                # Generar caption rico para MJ
+                caption = self._generate_mj_caption(client_id, img_path, metadata_dir)
+                caption_file = (
+                    training_data_subdir / f"{client_id}_mj_{i:03d}.txt"
+                )  # ← NUEVA UBICACIÓN
+
+                try:
+                    with open(caption_file, "w", encoding="utf-8") as f:
+                        f.write(caption)
+
+                    dataset_metadata[dst_name] = {
+                        "type": "mj",
+                        "weight": weights["mj_weight"],
+                        "caption": caption,
+                        "original_path": str(img_path),
+                        "kohya_path": str(dst_path),
+                        "kohya_caption_path": str(caption_file),
+                    }
+                except Exception as e:
+                    self.logger.error(f"Error escribiendo caption {caption_file}: {e}")
+
+            tracker.update(status=f"MJ: {dst_name}")
+
+        # Copiar imágenes reales A LA ESTRUCTURA KOHYA_SS
+        for i, img_path in enumerate(selected_real, 1):
+            dst_name = f"{client_id}_real_{i:03d}.png"
+            dst_path = training_data_subdir / dst_name  # ← NUEVA UBICACIÓN
+
+            if safe_copy_file(img_path, dst_path, self.logger):
+                # Generar caption para fotos reales
+                caption = self._generate_real_caption(client_id, img_path, metadata_dir)
+                caption_file = (
+                    training_data_subdir / f"{client_id}_real_{i:03d}.txt"
+                )  # ← NUEVA UBICACIÓN
+
+                try:
+                    with open(caption_file, "w", encoding="utf-8") as f:
+                        f.write(caption)
+
+                    dataset_metadata[dst_name] = {
+                        "type": "real",
+                        "weight": weights["real_weight"],
+                        "caption": caption,
+                        "original_path": str(img_path),
+                        "kohya_path": str(dst_path),
+                        "kohya_caption_path": str(caption_file),
+                    }
+                except Exception as e:
+                    self.logger.error(f"Error escribiendo caption {caption_file}: {e}")
+
+            tracker.update(status=f"Real: {dst_name}")
+
+        tracker.finish("Dataset LoRA Kohya_ss completado")
+
+        # Guardar metadata del dataset
+        dataset_info = {
+            "client_id": client_id,
+            "creation_date": datetime.now().isoformat(),
+            "avatar_type": avatar_type,
+            "distribution_strategy": distribution,
+            "total_images": len(dataset_metadata),
+            "mj_images": actual_mj_count,
+            "real_images": actual_real_count,
+            "balance_ratio": f"{actual_mj_count/(actual_mj_count+actual_real_count)*100:.1f}% MJ / {actual_real_count/(actual_mj_count+actual_real_count)*100:.1f}% Real",
+            "weight_config": weights,
+            "kohya_structure": {
+                "training_data_parent": str(training_data_parent),
+                "training_data_subdir": str(training_data_subdir),
+                "structure_version": "kohya_compatible_v1",
+                "total_files": len(dataset_metadata) * 2,  # imágenes + captions
+            },
+            "recommended_training": {
+                "total_steps": min(3500, len(dataset_metadata) * 30),
+                "batch_size": 1,
+                "learning_rate": 0.0001 if len(dataset_metadata) < 100 else 0.00008,
+                "dataset_repeats": max(1, 600 // len(dataset_metadata)),
+            },
+        }
+
+        # Guardar archivos de configuración EN METADATA (no en training_data)
+        dataset_config_file = metadata_dir / "lora_dataset_config_kohya.json"
+        save_json_safe(dataset_info, dataset_config_file, self.logger)
+
+        metadata_file = metadata_dir / "lora_dataset_metadata_kohya.json"
+        save_json_safe(dataset_metadata, metadata_file, self.logger)
+
+        # CREAR ARCHIVO DE INFORMACIÓN PARA LORA_TRAINER
+        trainer_info_file = training_data_subdir / "dataset_info.json"
+        trainer_info = {
+            "client_id": client_id,
+            "total_images": len(dataset_metadata),
+            "structure_type": "kohya_compatible",
+            "created_date": datetime.now().isoformat(),
+        }
+        save_json_safe(trainer_info, trainer_info_file, self.logger)
+
+        self.logger.info(f"Dataset LoRA Kohya_ss preparado exitosamente:")
+        self.logger.info(f"  Avatar tipo: {avatar_type}")
+        self.logger.info(f"  Total imágenes: {len(dataset_metadata)}")
+        self.logger.info(f"  Balance: {dataset_info['balance_ratio']}")
+        self.logger.info(f"  Captions generados: {len(dataset_metadata)}")
+        self.logger.info(f"  Estructura Kohya_ss: {training_data_subdir}")
+
+        return True

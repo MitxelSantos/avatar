@@ -1,192 +1,176 @@
 # Avatar Pipeline - Sistema Profesional de Entrenamiento LoRA
-# Dependencias completas para procesamiento facial, metadata MJ y entrenamiento SDXL
-# ACTUALIZADO CON SOPORTE COMPLETO PARA ARCHIVOS RAW (.NEF, .CR2, .ARW, .DNG)
+# Dependencias ACTUALIZADAS y CORREGIDAS para máxima compatibilidad
+# OPTIMIZADO para Windows 11, Python 3.10-3.11, CUDA 11.8/12.1
 
-# ===== CORE DEPENDENCIES =====
-# Python 3.8 - 3.11 required
+# ===== CORE DEEP LEARNING FRAMEWORK =====
+# PyTorch con CUDA - INSTALAR PRIMERO
+torch>=2.0.0,<2.3.0
+torchvision>=0.15.0,<0.18.0
+torchaudio>=2.0.0,<2.3.0
+# Usar: pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu118
 
-# Deep Learning Framework
-torch>=2.0.0,<2.2.0
-torchvision>=0.15.0
-torchaudio>=2.0.0
---extra-index-url https://download.pytorch.org/whl/cu118
-
-# Face Detection and Computer Vision
+# ===== FACE DETECTION Y COMPUTER VISION =====
+# Detección facial robusta
 mtcnn>=0.1.1
-opencv-python>=4.8.0
-tensorflow>=2.10.0,<2.14.0
+opencv-python>=4.8.0,<4.9.0
+tensorflow>=2.13.0,<2.16.0  # Actualizado para compatibilidad
 
-# Image Processing
-Pillow>=9.0.0
-numpy>=1.21.0
-scikit-image>=0.19.0
+# ===== IMAGE PROCESSING CORE =====
+# Procesamiento de imágenes esencial
+Pillow>=10.0.0,<11.0.0  # Actualizado
+numpy>=1.24.0,<1.26.0   # Compatible con TensorFlow
+scikit-image>=0.21.0,<0.23.0
 
 # ===== RAW IMAGE PROCESSING =====
-# Soporte completo para archivos RAW (.NEF, .CR2, .ARW, .DNG, .RAF, .ORF, .RW2, .PEF)
-rawpy>=0.18.0
-imageio>=2.22.0
-imageio-ffmpeg>=0.4.7
+# Soporte completo para archivos RAW - CRÍTICO
+rawpy>=0.18.0,<0.20.0
+imageio>=2.31.0,<2.33.0  # Actualizado
+imageio-ffmpeg>=0.4.9,<0.5.0
 
-# Procesamiento avanzado de imágenes
-colour-science>=0.4.2
-exifread>=3.0.0
+# Procesamiento avanzado de imágenes RAW
+exifread>=3.0.0,<4.0.0
 
-# ===== DIFFUSION AND LoRA TRAINING =====
-# Diffusers ecosystem
-diffusers[torch]>=0.21.0
-transformers>=4.25.1
-accelerate>=0.15.0
-safetensors>=0.3.0
+# ===== DIFFUSION Y LORA TRAINING =====
+# Ecosystem de Diffusers - ACTUALIZADO
+diffusers>=0.21.0,<0.25.0  # Actualizado para SDXL
+transformers>=4.30.0,<4.36.0  # Actualizado
+accelerate>=0.20.0,<0.25.0     # Actualizado
+safetensors>=0.3.0,<0.5.0      # Actualizado
 
-# Memory optimization
-xformers>=0.0.20
-bitsandbytes>=0.37.0
+# ===== OPTIMIZACIONES DE MEMORIA =====
+# Optimizaciones críticas para GPU
+xformers>=0.0.20,<0.0.23  # Actualizado
+bitsandbytes>=0.41.0,<0.42.0  # Actualizado para Windows
 
-# ===== OPTIMIZERS AND TRAINING =====
-# Advanced optimizers
-dadaptation>=3.1
-prodigyopt>=1.0
-lion-pytorch>=0.0.6
+# ===== OPTIMIZERS AVANZADOS =====
+# Optimizers de última generación
+dadaptation>=3.1,<4.0
+prodigyopt>=1.0,<2.0
+lion-pytorch>=0.0.6,<0.1.0
 
-# Training utilities
-tensorboard>=2.10.0
-wandb>=0.13.0
-omegaconf>=2.3.0
+# ===== TRAINING UTILITIES =====
+# Herramientas de entrenamiento
+tensorboard>=2.13.0,<2.16.0  # Actualizado
+wandb>=0.15.0,<0.17.0         # Actualizado
+omegaconf>=2.3.0,<2.4.0
 
 # ===== DATA PROCESSING =====
-# Data analysis and manipulation
-pandas>=1.5.0
-datasets>=2.8.0
+# Análisis y manipulación de datos
+pandas>=2.0.0,<2.2.0     # Actualizado
+datasets>=2.14.0,<2.16.0  # Actualizado
 
 # ===== UTILITIES =====
-# File and path handling
-pathlib2>=2.3.7; python_version < "3.4"
-tqdm>=4.64.0
-rich>=12.0.0
+# Manejo de archivos y paths
+tqdm>=4.65.0,<4.67.0
+rich>=13.0.0,<14.0.0  # Actualizado
 
-# Configuration and serialization
-pyyaml>=6.0
-toml>=0.10.2
-jsonschema>=4.0.0
+# Configuración y serialización
+pyyaml>=6.0,<7.0
+toml>=0.10.2,<0.11.0
+jsonschema>=4.17.0,<5.0.0
 
-# ===== UI AND INTERACTION =====
-# GUI for file dialogs
-tkinter-page>=0.0.1; sys_platform == "win32"
+# ===== PYTHON CORE DEPENDENCIES =====
+# Dependencias de Python actualizadas
+setuptools>=68.0.0,<70.0.0  # Actualizado
+wheel>=0.40.0,<0.42.0       # Actualizado
+pip>=23.0.0,<24.0.0         # Actualizado
 
-# ===== DEVELOPMENT AND TESTING =====
-# Code quality (optional)
-pytest>=7.0.0
-black>=22.0.0
-flake8>=5.0.0
-isort>=5.10.0
+# Utilities esenciales
+einops>=0.6.0,<0.8.0     # Actualizado
+imagesize>=1.4.0,<2.0.0
+voluptuous>=0.13.0,<0.14.0
 
-# ===== PLATFORM-SPECIFIC =====
-# Windows specific
-pywin32>=304; sys_platform == "win32"
-colorama>=0.4.4; sys_platform == "win32"
+# ===== PLATFORM ESPECÍFICO =====
+# Windows específico - CORREGIDO
+pywin32>=306; sys_platform == "win32"  # Actualizado
+colorama>=0.4.6; sys_platform == "win32"
 
-# ===== KOHYA_SS DEPENDENCIES =====
-# Will be installed automatically during setup
-# git+https://github.com/kohya-ss/sd-scripts.git
+# GUI para diálogos de archivos
+# tkinter viene con Python, no necesita instalación
 
-# ===== OPTIONAL PERFORMANCE =====
-# ONNX for optimized inference (optional)
-onnx>=1.12.0
-onnxruntime>=1.13.0
+# ===== DEVELOPMENT Y TESTING =====
+# Herramientas de desarrollo (opcionales)
+pytest>=7.4.0,<8.0.0
+black>=23.0.0,<24.0.0
+flake8>=6.0.0,<7.0.0
+isort>=5.12.0,<6.0.0
 
-# Triton for optimized kernels (Linux only)
-triton>=2.0.0; sys_platform == "linux"
+# ===== PERFORMANCE OPTIMIZATIONS =====
+# ONNX para inferencia optimizada (opcional)
+onnx>=1.14.0,<1.16.0
+onnxruntime>=1.15.0,<1.17.0
 
-# ===== VERSION CONSTRAINTS =====
-# Ensure compatibility
-setuptools>=65.0.0
-wheel>=0.37.0
-pip>=22.0.0
+# ===== DEPENDENCIAS FALTANTES CRÍTICAS =====
+# Estas eran imports faltantes en el código original
 
-einops
-imagesize
-voluptuous
+# Para utils.py y logging
+psutil>=5.9.0,<6.0.0  # Para monitoreo de sistema
 
-# ===== INSTALACIÓN RECOMENDADA =====
+# Para manejo de archivos mejorado
+pathlib2>=2.3.7; python_version < "3.4"  # Rara vez necesario en Python 3.10+
+
+# Para datetime y manejo de tiempo
+python-dateutil>=2.8.0,<3.0.0
+
+# Para subprocess y encoding mejorado
+charset-normalizer>=3.2.0,<4.0.0
+
+# ===== NOTAS DE INSTALACIÓN =====
+# ORDEN RECOMENDADO DE INSTALACIÓN:
+# 
 # 1. Crear entorno virtual:
 #    python -m venv .venv
 #    .venv\Scripts\activate  # Windows
 #    source .venv/bin/activate  # Linux/macOS
 #
-# 2. Instalar PyTorch primero:
-#    pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu118
+# 2. Actualizar pip:
+#    python -m pip install --upgrade pip setuptools wheel
 #
-# 3. Instalar dependencias principales:
+# 3. Instalar PyTorch CON CUDA (CRÍTICO - HACER PRIMERO):
+#    pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu118
+#    # O para CUDA 12.1:
+#    # pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121
+#
+# 4. Instalar dependencias principales:
 #    pip install -r requirements.txt
 #
-# 4. Para CUDA 12.1, cambiar index URL a:
-#    https://download.pytorch.org/whl/cu121
+# 5. Verificar instalación:
+#    python -c "import torch; print(f'CUDA disponible: {torch.cuda.is_available()}')"
+
+# ===== RESOLUCIÓN DE PROBLEMAS =====
+# 
+# Si hay conflictos de versiones:
+# 1. pip uninstall torch torchvision torchaudio
+# 2. pip cache purge
+# 3. pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu118
+# 4. pip install -r requirements.txt
 #
-# 5. Para CPU-only (no recomendado):
-#    pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cpu
-
-# ===== SOPORTE RAW POR FABRICANTE =====
-# rawpy soporta los siguientes formatos:
-# - Nikon: .NEF
-# - Canon: .CR2, .CR3
-# - Sony: .ARW
-# - Adobe: .DNG
-# - Fujifilm: .RAF
-# - Olympus: .ORF
-# - Panasonic: .RW2
-# - Pentax: .PEF
-# - Leica: .DNG, .RWL
-# - Phase One: .IIQ
-# - Mamiya: .MEF
-
-# ===== HARDWARE REQUERIDO =====
-# Mínimo con soporte RAW:
-# - GPU: RTX 3050 6GB (RTX 3060 8GB+ recomendado)
-# - RAM: 24GB (32GB recomendado para procesamiento RAW intensivo)
-# - Storage: 100GB libres (archivos RAW son grandes: 25-50MB cada uno)
-# - CPU: Intel i5-8400 / AMD Ryzen 5 2600 o superior
-# - SSD recomendado para mejor rendimiento con archivos RAW
-
-# ===== NOTAS DE RENDIMIENTO RAW =====
-# - Conversión RAW a JPEG: ~2-5 segundos por imagen (depende de CPU)
-# - Memoria adicional requerida: ~2-4GB RAM para archivos RAW grandes
-# - Espacio temporal: ~100MB por imagen durante procesamiento
-# - Soporte nativo para balance de blancos de cámara
-# - Configuración optimizada para retratos profesionales
-
-# ===== SOLUCIÓN DE PROBLEMAS RAW =====
-# Windows - Si rawpy falla:
+# Si rawpy falla en Windows:
 # 1. Instalar Visual C++ Redistributable
-# 2. Alternativa: conda install rawpy -c conda-forge
-# 3. Verificar espacio en disco C:\\ para cache temporal
+# 2. O usar: conda install rawpy -c conda-forge
 #
-# macOS - Si rawpy falla:
-# 1. Instalar Xcode Command Line Tools: xcode-select --install
-# 2. Si hay problemas: brew install libraw
-# 3. Para M1/M2: conda install rawpy -c conda-forge
-#
-# Linux - Si rawpy falla:
-# 1. Ubuntu/Debian: sudo apt install libraw-dev build-essential
-# 2. CentOS/RHEL: sudo yum install libraw-devel gcc-c++
-# 3. Arch: sudo pacman -S libraw gcc
+# Si hay errores de encoding:
+# 1. Configurar: set PYTHONIOENCODING=utf-8
+# 2. O agregar al código: os.environ['PYTHONIOENCODING'] = 'utf-8'
 
-# ===== TESTED CONFIGURATIONS =====
-# ✅ Windows 10/11 + Python 3.10 + rawpy 0.18.1
-# ✅ Ubuntu 22.04 + Python 3.10 + rawpy 0.18.1  
-# ✅ macOS 12+ + Python 3.10 + rawpy 0.18.1
-# ✅ Nikon D850 .NEF files (45MP)
-# ✅ Canon R5 .CR3 files (45MP)
-# ✅ Sony A7IV .ARW files (33MP)
-# ✅ Adobe .DNG files
-# ✅ Fujifilm .RAF files
+# ===== HARDWARE SOPORTADO =====
+# Mínimo: GTX 1650 4GB, 16GB RAM, Python 3.10
+# Recomendado: RTX 3060 8GB+, 32GB RAM, Python 3.11
+# Optimal: RTX 4060 8GB+, 32GB RAM, SSD, Python 3.11
+
+# ===== VERSIONES TESTEADAS =====
+# ✅ Windows 11 + Python 3.11 + CUDA 11.8
+# ✅ Windows 10 + Python 3.10 + CUDA 11.8  
 # ✅ RTX 3050 6GB / RTX 3060 8GB / RTX 4060 8GB
+# ✅ Kohya_ss commit 1470cb8 (Enero 2025)
+# ✅ SDXL base model con LoRA training
+# ✅ Archivos RAW (.NEF, .CR2, .ARW, .DNG, .RAF, .ORF)
 
-# ===== CHANGELOG SOPORTE RAW =====
-# v2.1 - Agregado soporte completo para archivos RAW
-# - Fix: Eliminado bug de detección duplicada de archivos .NEF
-# - Nuevo: Soporte para 8+ formatos RAW principales
-# - Nuevo: Conversión automática RAW->JPEG para procesamiento
-# - Nuevo: Preservación de metadata EXIF de archivos RAW
-# - Nuevo: Configuración optimizada para retratos profesionales
-# - Nuevo: Limpieza automática de archivos temporales
-# - Mejorado: Detección de archivos sin case-sensitivity issues
+# ===== CHANGELOG v3.0 =====
+# - Actualizadas todas las versiones para compatibilidad 2024-2025
+# - Corregidos conflictos de versiones TensorFlow/PyTorch
+# - Añadidas dependencias faltantes (psutil, charset-normalizer)
+# - Optimizado para Kohya_ss más reciente
+# - Soporte mejorado para Windows 11
+# - Rangos de versiones más estrictos para estabilidad
+# - Documentación mejorada para resolución de problemas

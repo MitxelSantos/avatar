@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
 """
-Avatar Pipeline - VERSIÓN CON FIXES DE NAVEGACIÓN Y CUDA
+Avatar Pipeline - VERSIÓN CORREGIDA CON ESTRUCTURA KOHYA_SS
 FIXES APLICADOS:
+- Estructura de directorios compatible con Kohya_ss desde el setup
+- Imports corregidos para módulos faltantes
 - Navegación correcta al crear cliente
 - Mejor detección e instrucciones para CUDA
-- Validación de PyTorch con CUDA específica
 """
 
 import os
@@ -21,7 +22,7 @@ os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3"
 os.environ["TF_ENABLE_ONEDNN_OPTS"] = "0"
 warnings.filterwarnings("ignore")
 
-# Imports de módulos especializados
+# Imports de módulos especializados - CON MANEJO DE ERRORES
 try:
     from image_processor import FaceProcessor
     from data_preprocessor import DataPreprocessor
@@ -231,7 +232,7 @@ class AvatarPipeline:
         self.wait_input()
 
     def create_client(self):
-        """VERSIÓN CORREGIDA: Navega automáticamente al menú de operaciones"""
+        """VERSIÓN CORREGIDA: Navega automáticamente al menú de operaciones + ESTRUCTURA KOHYA_SS"""
         self.clear_screen()
         self.show_header()
 
@@ -252,24 +253,29 @@ class AvatarPipeline:
 
             break
 
-        # Crear estructura completa
+        # ESTRUCTURA CORREGIDA PARA KOHYA_SS
         subdirs = [
             "raw_mj",  # Imágenes MJ originales
             "raw_real",  # Fotos reales originales
             "processed",  # Imágenes procesadas 1024x1024
-            "dataset_lora",  # Dataset final para entrenamiento
+            "training_data",  # ← NUEVO: Directorio padre para Kohya_ss
             "rejected",  # Imágenes rechazadas por QC
             "metadata",  # Logs, CSVs, configuraciones
-            "training",  # Checkpoints y logs de entrenamiento
+            "training/logs",  # Logs de entrenamiento (nested)
             "models",  # Modelos LoRA finales
             "samples",  # Muestras generadas durante entrenamiento
             "output",  # Exports y resultados finales
         ]
 
-        print(f"\n🏗️ Creando estructura para: {client_id}")
+        print(f"\n🏗️ Creando estructura KOHYA_SS para: {client_id}")
         for subdir in subdirs:
             (client_path / subdir).mkdir(parents=True, exist_ok=True)
             print(f"  ✅ {subdir}/")
+
+        # CREAR SUBDIRECTORIO ESPECÍFICO PARA KOHYA_SS
+        training_subdir = client_path / "training_data" / client_id
+        training_subdir.mkdir(parents=True, exist_ok=True)
+        print(f"  ✅ training_data/{client_id}/ (estructura Kohya_ss)")
 
         # Crear archivo de configuración del cliente
         client_config = {
@@ -280,6 +286,11 @@ class AvatarPipeline:
             "processing_settings": self.qc_params.copy(),
             "training_history": [],
             "status": "created",
+            "kohya_structure": {
+                "training_data_parent": str(client_path / "training_data"),
+                "training_data_subdir": str(training_subdir),
+                "structure_version": "kohya_compatible_v1",
+            },
         }
 
         config_file = client_path / "metadata" / "client_config.json"
@@ -288,6 +299,7 @@ class AvatarPipeline:
 
         print(f"\n✅ Cliente '{client_id}' creado exitosamente!")
         print(f"📋 Configuración guardada en: {config_file}")
+        print(f"🔧 Estructura compatible con Kohya_ss creada")
 
         # FIX: Preguntar si seleccionarlo Y navegar automáticamente
         select_client = (
@@ -354,10 +366,10 @@ class AvatarPipeline:
                 if (client_path / "raw_real").exists()
                 else 0
             )
+            # CORREGIDO: Buscar en training_data/client_id en lugar de dataset_lora
+            training_subdir = client_path / "training_data" / client
             lora_count = (
-                len(list((client_path / "dataset_lora").glob("*")))
-                if (client_path / "dataset_lora").exists()
-                else 0
+                len(list(training_subdir.glob("*"))) if training_subdir.exists() else 0
             )
             models_count = (
                 len(list((client_path / "models").glob("*.safetensors")))
@@ -468,12 +480,19 @@ class AvatarPipeline:
             )
             print(f"   Entrenamientos: {len(config.get('training_history', []))}")
 
-        # Contar archivos por directorio
+            # NUEVO: Mostrar estructura Kohya_ss
+            kohya_info = config.get("kohya_structure", {})
+            if kohya_info:
+                print(
+                    f"   Estructura Kohya_ss: {kohya_info.get('structure_version', 'N/A')}"
+                )
+
+        # Contar archivos por directorio - ACTUALIZADO PARA NUEVA ESTRUCTURA
         subdirs = [
             "raw_mj",
             "raw_real",
             "processed",
-            "dataset_lora",
+            ("training_data", self.current_client),  # ← Subdirectorio específico
             "rejected",
             "models",
             "samples",
@@ -481,8 +500,16 @@ class AvatarPipeline:
         total_files = 0
 
         print(f"\n📂 CONTENIDO POR DIRECTORIO:")
-        for subdir in subdirs:
-            subdir_path = client_path / subdir
+        for subdir_info in subdirs:
+            if isinstance(subdir_info, tuple):
+                subdir, nested = subdir_info
+                subdir_path = client_path / subdir / nested
+                display_name = f"{subdir}/{nested}"
+            else:
+                subdir = subdir_info
+                subdir_path = client_path / subdir
+                display_name = subdir
+
             if subdir_path.exists():
                 if subdir == "models":
                     count = len(list(subdir_path.glob("*.safetensors")))
@@ -495,13 +522,13 @@ class AvatarPipeline:
                     "raw_mj": "🎨",
                     "raw_real": "📷",
                     "processed": "🔄",
-                    "dataset_lora": "🎯",
+                    "training_data": "🎯",
                     "rejected": "❌",
                     "models": "🧠",
                     "samples": "🖼️",
                 }
                 icon = icons.get(subdir, "📂")
-                print(f"   {icon} {subdir:15s}: {count:3d} archivos")
+                print(f"   {icon} {display_name:20s}: {count:3d} archivos")
 
         print(f"\n📊 Total de archivos: {total_files}")
 
@@ -515,6 +542,35 @@ class AvatarPipeline:
         self.wait_input()
 
     # === OPERACIONES PRINCIPALES ===
+
+    def prepare_lora_training(self):
+        if not self.current_client:
+            print("❌ No hay cliente seleccionado")
+            self.wait_input()
+            return False
+
+        print(f"\n🎯 PREPARANDO ENTRENAMIENTO LORA...")
+
+        # ACTUALIZADO: Usar nueva estructura Kohya_ss
+        success = self.data_preprocessor.prepare_lora_dataset_kohya(
+            client_id=self.current_client, clients_dir=self.clients_dir
+        )
+
+        if success:
+            print(f"✅ Dataset LoRA preparado con estructura Kohya_ss")
+
+            # Preguntar si configurar entrenamiento
+            if (
+                input("\n¿Configurar parámetros de entrenamiento ahora? (s/n): ")
+                .lower()
+                .startswith("s")
+            ):
+                return self.configure_lora_training()
+
+        return success
+
+    # Mantener todos los otros métodos iguales...
+    # (load_mj_images, load_real_images, process_images, etc.)
 
     def load_mj_images(self):
         if not self.current_client:
@@ -664,32 +720,6 @@ class AvatarPipeline:
         self.wait_input()
         return success
 
-    def prepare_lora_training(self):
-        if not self.current_client:
-            print("❌ No hay cliente seleccionado")
-            self.wait_input()
-            return False
-
-        print(f"\n🎯 PREPARANDO ENTRENAMIENTO LORA...")
-
-        # Usar data_preprocessor para generar captions y balance de datos
-        success = self.data_preprocessor.prepare_lora_dataset(
-            client_id=self.current_client, clients_dir=self.clients_dir
-        )
-
-        if success:
-            print(f"✅ Dataset LoRA preparado con balance 85% MJ / 15% Real")
-
-            # Preguntar si configurar entrenamiento
-            if (
-                input("\n¿Configurar parámetros de entrenamiento ahora? (s/n): ")
-                .lower()
-                .startswith("s")
-            ):
-                return self.configure_lora_training()
-
-        return success
-
     def configure_lora_training(self):
         if not self.current_client:
             print("❌ No hay cliente seleccionado")
@@ -768,14 +798,14 @@ class AvatarPipeline:
             client_path = self.clients_dir / self.current_client
 
             # Verificaciones previas con debug
-            dataset_dir = client_path / "dataset_lora"
+            training_subdir = client_path / "training_data" / self.current_client
             config_file = client_path / "training" / "lora_config.json"
 
-            print(f"📁 Dataset dir existe: {dataset_dir.exists()}")
+            print(f"📁 Training dir existe: {training_subdir.exists()}")
             print(f"📄 Config file existe: {config_file.exists()}")
 
-            if dataset_dir.exists():
-                dataset_images = list(dataset_dir.glob("*.png"))
+            if training_subdir.exists():
+                dataset_images = list(training_subdir.glob("*.png"))
                 print(f"🖼️ Imágenes en dataset: {len(dataset_images)}")
 
             # Ejecutar entrenamiento
@@ -803,7 +833,7 @@ class AvatarPipeline:
             self.wait_input()
             return False
 
-    # === MENÚS ===
+    # === MENÚS - Sin cambios ===
 
     def show_main_menu(self):
         self.clear_screen()
@@ -838,9 +868,10 @@ class AvatarPipeline:
 
         # Verificar estado del cliente
         client_path = self.clients_dir / self.current_client
-        dataset_ready = (client_path / "dataset_lora").exists() and len(
-            list((client_path / "dataset_lora").glob("*.png"))
-        ) > 0
+        training_subdir = client_path / "training_data" / self.current_client
+        dataset_ready = (
+            training_subdir.exists() and len(list(training_subdir.glob("*.png"))) > 0
+        )
         config_ready = (client_path / "training" / "lora_config.json").exists()
         has_models = (client_path / "models").exists() and len(
             list((client_path / "models").glob("*.safetensors"))
@@ -886,11 +917,11 @@ class AvatarPipeline:
         max_option = 13
         return input(f"\nSelecciona una opción (1-{max_option}): ").strip()
 
-    # === FUNCIONES DE CONTROL ===
+    # === FUNCIONES DE CONTROL - Sin cambios ===
 
     def run_main(self):
-        print("🚀 Iniciando Avatar Pipeline - VERSIÓN CON FIXES")
-        print("✅ Navegación corregida + Diagnóstico CUDA mejorado")
+        print("🚀 Iniciando Avatar Pipeline - VERSIÓN CON ESTRUCTURA KOHYA_SS")
+        print("✅ Navegación corregida + Estructura de directorios compatible")
         time.sleep(1)
 
         while True:
@@ -1007,7 +1038,7 @@ class AvatarPipeline:
             self.wait_input()
             return
 
-        # Estadísticas agregadas
+        # Estadísticas agregadas - ACTUALIZADO PARA NUEVA ESTRUCTURA
         total_clients = len(client_list)
         total_mj = 0
         total_real = 0
@@ -1030,10 +1061,10 @@ class AvatarPipeline:
                 if (client_path / "raw_real").exists()
                 else 0
             )
+            # ACTUALIZADO: Buscar en training_data/client en lugar de dataset_lora
+            training_subdir = client_path / "training_data" / client
             processed_count = (
-                len(list((client_path / "dataset_lora").glob("*")))
-                if (client_path / "dataset_lora").exists()
-                else 0
+                len(list(training_subdir.glob("*"))) if training_subdir.exists() else 0
             )
             models_count = (
                 len(list((client_path / "models").glob("*.safetensors")))

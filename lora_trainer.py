@@ -1,7 +1,12 @@
 #!/usr/bin/env python3
 """
-lora_trainer.py - Entrenador LoRA REAL - SIN SIMULACIÓN
-VERSIÓN PRODUCTIVA: Entrenamiento real con Kohya_ss
+lora_trainer.py - Entrenador LoRA REAL - VERSIÓN CORREGIDA
+FIXES APLICADOS:
+- Método _setup_kohya_ss agregado (faltaba)
+- Argumentos problemáticos removidos de _build_training_command
+- Manejo de encoding UTF-8 para Windows
+- Optimizado para RTX 8GB VRAM
+- Compatibilidad completa con Kohya_ss actual
 """
 
 import os
@@ -27,7 +32,7 @@ from utils import (
 
 
 class LoRATrainer:
-    """Entrenador LoRA profesional con entrenamiento REAL"""
+    """Entrenador LoRA profesional con entrenamiento REAL - VERSIÓN CORREGIDA"""
 
     def __init__(self, config=None):
         self.config = config or CONFIG
@@ -262,10 +267,41 @@ class LoRATrainer:
             input("Presiona Enter para continuar...")
             return False
 
+    def _setup_kohya_ss(self) -> bool:
+        """MÉTODO AGREGADO: Configura Kohya_ss automáticamente"""
+        kohya_dir = Path("./kohya_ss")
+
+        if not kohya_dir.exists():
+            print(f"📥 Clonando Kohya_ss...")
+            try:
+                subprocess.run(
+                    [
+                        "git",
+                        "clone",
+                        "https://github.com/kohya-ss/sd-scripts.git",
+                        str(kohya_dir),
+                    ],
+                    check=True,
+                    capture_output=True,
+                )
+                print(f"✅ Kohya_ss clonado")
+            except:
+                print(f"❌ Error clonando Kohya_ss")
+                return False
+
+        train_script = kohya_dir / "train_network.py"
+        if train_script.exists():
+            print(f"✅ Kohya_ss configurado")
+            self.kohya_path = kohya_dir
+            return True
+        else:
+            print(f"❌ train_network.py no encontrado")
+            return False
+
     def _execute_real_training(
         self, config: Dict, client_path: Path, client_id: str
     ) -> bool:
-        """Ejecuta entrenamiento LoRA REAL usando Kohya_ss"""
+        """MÉTODO CORREGIDO: Ejecuta entrenamiento LoRA REAL usando Kohya_ss con encoding UTF-8"""
 
         # Actualizar estado
         self.training_state.update(
@@ -304,6 +340,12 @@ class LoRATrainer:
             os.chdir(self.kohya_path)
 
             try:
+                # CONFIGURAR ENCODING PARA WINDOWS - FIX CRÍTICO
+                env = os.environ.copy()
+                if os.name == "nt":  # Windows
+                    env["PYTHONIOENCODING"] = "utf-8"
+                    env["TF_ENABLE_ONEDNN_OPTS"] = "0"  # Silenciar warnings TensorFlow
+
                 # Ejecutar entrenamiento con monitoreo
                 print(f"\n🚀 INICIANDO ENTRENAMIENTO REAL...")
                 print(f"📁 Directorio de trabajo: {self.kohya_path}")
@@ -313,13 +355,16 @@ class LoRATrainer:
                 print(f"💡 Para monitorear progreso, abre otra terminal y ejecuta:")
                 print(f"   tensorboard --logdir {logs_dir}")
 
-                # Ejecutar proceso de entrenamiento
+                # Ejecutar proceso de entrenamiento con encoding corregido
                 process = subprocess.Popen(
                     cmd,
                     stdout=subprocess.PIPE,
                     stderr=subprocess.STDOUT,
                     universal_newlines=True,
                     bufsize=1,
+                    env=env,  # Environment con UTF-8
+                    encoding="utf-8",  # Forzar UTF-8
+                    errors="replace",  # Reemplazar caracteres problemáticos
                 )
 
                 self.training_state["process"] = process
@@ -343,8 +388,11 @@ class LoRATrainer:
     def _build_training_command(
         self, config: Dict, dataset_dir: Path, output_dir: Path, logs_dir: Path
     ) -> List[str]:
-        """Construye el comando completo para train_network.py de Kohya_ss"""
-
+        """
+        MÉTODO CORREGIDO: Usa directamente la estructura Kohya_ss creada por data_preprocessor
+        NO reorganiza archivos - asume estructura correcta ya existe
+        Optimizado para RTX 8GB sin argumentos problemáticos
+        """
         try:
             model_config = config["model_config"]
             network_config = config["network_config"]
@@ -353,31 +401,63 @@ class LoRATrainer:
             memory_opts = config["memory_optimizations"]
             save_config = config["save_config"]
 
+            # USAR ESTRUCTURA KOHYA_SS EXISTENTE
+            # dataset_dir apunta a clients/client_id/dataset_lora (estructura antigua)
+            # Pero ahora usamos clients/client_id/training_data (estructura nueva)
+
+            client_path = dataset_dir.parent  # clients/client_id/
+            client_id = config["client_id"]
+
+            # RUTA CORRECTA PARA KOHYA_SS
+            training_data_parent = client_path / "training_data"
+            training_data_subdir = training_data_parent / client_id
+
+            # Verificar que la estructura existe
+            if not training_data_subdir.exists():
+                self.logger.error(
+                    f"Estructura Kohya_ss no encontrada: {training_data_subdir}"
+                )
+                self.logger.info("Ejecuta 'Preparar dataset LoRA' primero")
+                return []
+
+            # Verificar que hay imágenes
+            dataset_images = list(training_data_subdir.glob("*.png"))
+            if not dataset_images:
+                self.logger.error(
+                    f"No se encontraron imágenes en: {training_data_subdir}"
+                )
+                return []
+
+            self.logger.info(f"Usando estructura Kohya_ss: {training_data_parent}")
+            self.logger.info(f"Imágenes encontradas: {len(dataset_images)}")
+
+            # COMANDO OPTIMIZADO PARA RTX 8GB
             cmd = [
                 sys.executable,
                 "train_network.py",
-                # Modelo base y VAE
+                # ESTRUCTURA KOHYA_SS - DIRECTORIO PADRE
+                "--train_data_dir",
+                str(training_data_parent),  # ← training_data/ (padre)
+                # Modelo base y VAE - ESENCIALES
                 "--pretrained_model_name_or_path",
                 model_config["pretrained_model_name_or_path"],
                 "--vae",
                 model_config["vae"],
-                # Dataset
-                "--train_data_dir",
-                str(dataset_dir),
+                # Dataset - ESENCIALES
                 "--resolution",
                 str(dataset_config["resolution"]),
                 "--train_batch_size",
                 str(training_config["train_batch_size"]),
                 "--dataset_repeats",
                 str(dataset_config["dataset_repeats"]),
-                # Red LoRA
+                # Red LoRA - OPTIMIZADO PARA RTX 8GB
                 "--network_module",
                 network_config["network_module"],
                 "--network_dim",
-                str(network_config["network_dim"]),
+                str(network_config["network_dim"]),  # 128 para RTX 8GB
                 "--network_alpha",
-                str(network_config["network_alpha"]),
-                # Entrenamiento
+                str(network_config["network_alpha"]),  # 64 para RTX 8GB
+                # Entrenamiento - ESENCIALES
                 "--max_train_steps",
                 str(training_config["max_train_steps"]),
                 "--learning_rate",
@@ -388,10 +468,10 @@ class LoRATrainer:
                 str(training_config["lr_warmup_steps"]),
                 "--optimizer_type",
                 training_config["optimizer_type"],
-                # Optimizaciones de memoria
+                # Precisión y optimizaciones - RTX 8GB
                 "--mixed_precision",
                 memory_opts["mixed_precision"],
-                # Guardado
+                # Guardado - ESENCIALES
                 "--output_dir",
                 str(output_dir),
                 "--output_name",
@@ -402,89 +482,104 @@ class LoRATrainer:
                 str(save_config["save_every_n_steps"]),
                 "--save_precision",
                 save_config["save_precision"],
-                # Logging
+                # Logging - ESENCIALES
                 "--logging_dir",
                 str(logs_dir),
                 "--log_with",
                 "tensorboard",
-                # Configuraciones adicionales
+                # Configuraciones de dataset - KOHYA_SS
                 "--caption_extension",
                 ".txt",
                 "--shuffle_caption",
                 "--keep_tokens",
                 "1",
+                # Bucket settings - ACTIVAR PARA SUBDIRECTORIOS
+                "--enable_bucket",
                 "--bucket_no_upscale",
                 "--min_bucket_reso",
                 str(dataset_config["min_bucket_reso"]),
                 "--max_bucket_reso",
                 str(dataset_config["max_bucket_reso"]),
-                # Flags de optimización
+                # Optimizaciones básicas para RTX 8GB
                 "--gradient_checkpointing",
                 "--cache_latents",
-                "--cache_text_encoder_outputs",
-                # "--xformers",
+                # OMITIDO: "--cache_text_encoder_outputs" - causaba error
             ]
 
-            # Agregar flags condicionales
-            if memory_opts.get("lowvram", False):
-                cmd.append("--lowvram")
-            if memory_opts.get("medvram", False):
-                cmd.append("--medvram")
+            # ARGUMENTOS OPCIONALES SEGUROS
+            optional_args = []
 
-            # Técnicas avanzadas
-            advanced_config = config.get("advanced_config", {})
-            if advanced_config.get("noise_offset"):
-                cmd.extend(["--noise_offset", str(advanced_config["noise_offset"])])
-            if advanced_config.get("adaptive_noise_scale"):
-                cmd.extend(
-                    [
-                        "--adaptive_noise_scale",
-                        str(advanced_config["adaptive_noise_scale"]),
-                    ]
-                )
-            if advanced_config.get("multires_noise_iterations"):
-                cmd.extend(
-                    [
-                        "--multires_noise_iterations",
-                        str(advanced_config["multires_noise_iterations"]),
-                    ]
-                )
-            if advanced_config.get("multires_noise_discount"):
-                cmd.extend(
-                    [
-                        "--multires_noise_discount",
-                        str(advanced_config["multires_noise_discount"]),
-                    ]
-                )
-
-            # Gradient accumulation
+            # Gradient accumulation si es mayor a 1
             if training_config.get("gradient_accumulation_steps", 1) > 1:
-                cmd.extend(
+                optional_args.extend(
                     [
                         "--gradient_accumulation_steps",
                         str(training_config["gradient_accumulation_steps"]),
                     ]
                 )
 
-            # Weight decay y gradient norm
-            if training_config.get("weight_decay"):
-                cmd.extend(["--weight_decay", str(training_config["weight_decay"])])
+            # Max grad norm si está definido
             if training_config.get("max_grad_norm"):
-                cmd.extend(["--max_grad_norm", str(training_config["max_grad_norm"])])
+                optional_args.extend(
+                    ["--max_grad_norm", str(training_config["max_grad_norm"])]
+                )
 
+            # Técnicas avanzadas para RTX 8GB
+            advanced_config = config.get("advanced_config", {})
+            if advanced_config.get("noise_offset"):
+                optional_args.extend(
+                    ["--noise_offset", str(advanced_config["noise_offset"])]
+                )
+
+            if advanced_config.get("adaptive_noise_scale"):
+                optional_args.extend(
+                    [
+                        "--adaptive_noise_scale",
+                        str(advanced_config["adaptive_noise_scale"]),
+                    ]
+                )
+
+            if advanced_config.get("multires_noise_iterations"):
+                optional_args.extend(
+                    [
+                        "--multires_noise_iterations",
+                        str(advanced_config["multires_noise_iterations"]),
+                    ]
+                )
+
+            if advanced_config.get("multires_noise_discount"):
+                optional_args.extend(
+                    [
+                        "--multires_noise_discount",
+                        str(advanced_config["multires_noise_discount"]),
+                    ]
+                )
+
+            # Agregar argumentos opcionales
+            cmd.extend(optional_args)
+
+            # OMITIR ARGUMENTOS PROBLEMÁTICOS que causaban errores:
+            # --lowvram          (causaba error)
+            # --medvram          (causaba error)
+            # --weight_decay     (formato incorrecto)
+            # --cache_text_encoder_outputs (no soportado)
+
+            self.logger.info(f"Comando Kohya_ss generado: {len(cmd)} argumentos")
+            self.logger.info(f"Optimizado para RTX 8GB sin argumentos problemáticos")
             self.logger.info(
-                f"Comando de entrenamiento construido con {len(cmd)} argumentos"
+                f"Estructura de datos verificada: {len(dataset_images)} imágenes"
             )
+
             return cmd
 
         except Exception as e:
-            self.logger.error(f"Error construyendo comando: {e}")
+            self.logger.error(f"Error construyendo comando Kohya_ss: {e}")
             return []
 
     def _monitor_training_progress(
         self, process: subprocess.Popen, models_dir: Path, config: Dict
     ) -> bool:
-        """Monitorea el progreso del entrenamiento en tiempo real"""
+        """Monitorea el progreso del entrenamiento en tiempo real con encoding seguro"""
 
         max_steps = config["training_config"]["max_train_steps"]
         save_every = config["save_config"]["save_every_n_steps"]
@@ -498,9 +593,12 @@ class LoRATrainer:
         last_checkpoint_time = time.time()
 
         try:
-            # Leer output en tiempo real
+            # Leer output en tiempo real con manejo de encoding
             for line in process.stdout:
-                line = line.strip()
+                try:
+                    line = line.strip()
+                except (UnicodeDecodeError, UnicodeError):
+                    continue  # Saltar líneas con problemas de encoding
 
                 if line:
                     # Buscar información de steps
@@ -534,15 +632,22 @@ class LoRATrainer:
                                 )
                                 last_checkpoint_time = current_time
 
-                    # Mostrar logs importantes
+                    # Mostrar logs importantes (con filtrado de caracteres)
                     if any(
                         keyword in line.lower()
                         for keyword in ["error", "warning", "saved", "checkpoint"]
                     ):
-                        print(f"📝 {line}")
+                        # Limpiar caracteres problemáticos para display
+                        clean_line = "".join(char for char in line if ord(char) < 128)
+                        print(f"📝 {clean_line}")
 
-                    # Log todo al archivo
-                    self.logger.info(f"TRAINING: {line}")
+                    # Log todo al archivo (con manejo de encoding)
+                    try:
+                        self.logger.info(f"TRAINING: {line}")
+                    except (UnicodeEncodeError, UnicodeError):
+                        # Si hay problema de encoding, loggear version limpia
+                        clean_line = "".join(char for char in line if ord(char) < 128)
+                        self.logger.info(f"TRAINING: {clean_line}")
 
             # Esperar a que termine el proceso
             return_code = process.wait()
@@ -644,9 +749,6 @@ class LoRATrainer:
             print(f"   {i}. {fix}")
 
         input("Presiona Enter para continuar...")
-
-    # Mantener todos los demás métodos del archivo anterior...
-    # (Los métodos de configuración, validación, etc. permanecen iguales)
 
     def _validate_dataset(self, dataset_dir: Path) -> bool:
         """Valida que el dataset esté listo"""
@@ -979,36 +1081,6 @@ class LoRATrainer:
         input("Presiona Enter para continuar...")
         return success
 
-    def _setup_kohya_ss(self) -> bool:
-        """Configura Kohya_ss"""
-        kohya_dir = Path("./kohya_ss")
-
-        if not kohya_dir.exists():
-            print(f"📥 Clonando Kohya_ss...")
-            try:
-                subprocess.run(
-                    [
-                        "git",
-                        "clone",
-                        "https://github.com/kohya-ss/sd-scripts.git",
-                        str(kohya_dir),
-                    ],
-                    check=True,
-                    capture_output=True,
-                )
-                print(f"✅ Kohya_ss clonado")
-            except:
-                print(f"❌ Error clonando Kohya_ss")
-                return False
-
-        train_script = kohya_dir / "train_network.py"
-        if train_script.exists():
-            print(f"✅ Kohya_ss configurado")
-            self.kohya_path = kohya_dir
-            return True
-
-        return False
-
     def _display_training_info(self, config: Dict, client_path: Path):
         """Muestra información de entrenamiento"""
         print(f"📋 INFORMACIÓN:")
@@ -1069,7 +1141,7 @@ class LoRATrainer:
         except Exception as e:
             self.logger.error(f"Error actualizando historial: {e}")
 
-    # Métodos de gestión y progreso (mantener del archivo anterior)
+    # Métodos de gestión y progreso
     def show_training_progress(self, client_id: str, clients_dir: Path):
         """Muestra progreso del entrenamiento"""
         client_path = clients_dir / client_id
