@@ -19,9 +19,9 @@ imageio-ffmpeg==0.4.9
 exifread==3.0.0
 
 # DIFFUSION & LORA
-diffusers==0.25.1
-transformers==4.36.2
-accelerate==0.25.0
+diffusers==0.27.2
+transformers==4.38.2
+accelerate==0.27.2
 safetensors==0.4.1
 
 # XFORMERS - CRÍTICO para 4GB VRAM

@@ -435,26 +435,40 @@ class LoRATrainer:
             save_config = config["save_config"]
 
             # USAR ESTRUCTURA KOHYA_SS EXISTENTE
-            client_path = (
-                dataset_dir.parent
-                if "training_data" in str(dataset_dir)
-                else dataset_dir.parent
-            )
             client_id = config["client_id"]
 
-            # RUTA CORRECTA PARA KOHYA_SS
-            training_data_parent = client_path / "training_data"
-            training_data_subdir = training_data_parent / client_id
+            # CORREGIDO: Detectar estructura correctamente
+            if "training_data" in str(dataset_dir) and dataset_dir.name == client_id:
+                # Ya viene de training_data/client_id estructura Kohya_ss
+                training_data_subdir = (
+                    dataset_dir  # clients/Esoterico/training_data/Esoterico
+                )
+                training_data_parent = (
+                    dataset_dir.parent
+                )  # clients/Esoterico/training_data
+                client_path = dataset_dir.parent.parent  # clients/Esoterico
+                self.logger.info(
+                    f"Estructura Kohya_ss detectada: {training_data_subdir}"
+                )
 
-            # Si no existe estructura Kohya, usar antigua
-            if not training_data_subdir.exists():
-                # Fallback a estructura antigua
-                if (client_path / "dataset_lora").exists():
-                    training_data_parent = client_path / "dataset_lora"
-                    training_data_subdir = training_data_parent
-                    self.logger.warning("Usando estructura antigua dataset_lora/")
-                else:
+            elif "dataset_lora" in str(dataset_dir):
+                # Estructura antigua dataset_lora
+                client_path = dataset_dir.parent  # clients/Esoterico
+                training_data_parent = dataset_dir  # clients/Esoterico/dataset_lora
+                training_data_subdir = dataset_dir  # clients/Esoterico/dataset_lora
+                self.logger.warning("Usando estructura antigua dataset_lora/")
+
+            else:
+                # Otro caso - buscar estructura Kohya
+                client_path = (
+                    dataset_dir if dataset_dir.name != client_id else dataset_dir.parent
+                )
+                training_data_parent = client_path / "training_data"
+                training_data_subdir = training_data_parent / client_id
+
+                if not training_data_subdir.exists():
                     self.logger.error(f"No se encontró dataset en ninguna ubicación")
+                    self.logger.error(f"  Buscado en: {training_data_subdir}")
                     return []
 
             # Verificar que hay imágenes
