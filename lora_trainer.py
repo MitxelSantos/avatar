@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 lora_trainer.py - Entrenador LoRA COMPLETO Y CORREGIDO
-Versión 4.0 - Sin warnings, optimizado para SDXL, estructura Kohya_ss automática
+Versión 5.0 - Con flags anti-NaN y optimizaciones para GTX 1650
 """
 
 import os
@@ -328,7 +328,7 @@ class LoRATrainer:
     def _execute_real_training(
         self, config: Dict, client_path: Path, client_id: str
     ) -> bool:
-        """Ejecuta entrenamiento LoRA REAL usando Kohya_ss - VERSIÓN CORREGIDA"""
+        """Ejecuta entrenamiento LoRA REAL usando Kohya_ss - VERSIÓN CON FLAGS ANTI-NaN"""
 
         self.training_state.update(
             {
@@ -418,7 +418,7 @@ class LoRATrainer:
     ) -> List[str]:
         """
         Construye comando Kohya_ss CORREGIDO para SDXL
-        Usa sdxl_train_network.py y estructura automática
+        VERSIÓN 5.0: Con flags anti-NaN agregados
         """
         try:
             model_config = config["model_config"]
@@ -427,6 +427,7 @@ class LoRATrainer:
             dataset_config = config["dataset_config"]
             memory_opts = config["memory_optimizations"]
             save_config = config["save_config"]
+            advanced_config = config.get("advanced_config", {})
 
             client_id = config["client_id"]
 
@@ -447,10 +448,10 @@ class LoRATrainer:
             self.logger.info(f"Dataset verificado: {dataset_dir.name}")
             self.logger.info(f"Imágenes encontradas: {len(dataset_images)}")
 
-            # COMANDO OPTIMIZADO PARA SDXL
+            # COMANDO OPTIMIZADO PARA SDXL CON FLAGS ANTI-NaN
             cmd = [
                 sys.executable,
-                "sdxl_train_network.py",  # Script correcto para SDXL
+                "sdxl_train_network.py",
                 # Dataset - Directorio padre (Kohya detecta subdirectorios)
                 "--train_data_dir",
                 str(training_data_parent),
@@ -487,6 +488,8 @@ class LoRATrainer:
                 "--gradient_checkpointing",
                 "--cache_latents",
                 "--no_half_vae",  # CRÍTICO: evita NaN en latents
+                # FLAGS ANTI-NaN AGREGADOS
+                "--scale_v_pred_loss_like_noise_pred",  # Previene NaN en VAE
                 # Guardado
                 "--output_dir",
                 str(output_dir),
@@ -517,7 +520,10 @@ class LoRATrainer:
             if training_config.get("max_grad_norm"):
                 cmd.extend(["--max_grad_norm", str(training_config["max_grad_norm"])])
 
-            advanced_config = config.get("advanced_config", {})
+            # FLAGS AVANZADOS ANTI-NaN
+            if advanced_config.get("min_snr_gamma"):
+                cmd.extend(["--min_snr_gamma", str(advanced_config["min_snr_gamma"])])
+
             if advanced_config.get("noise_offset"):
                 cmd.extend(["--noise_offset", str(advanced_config["noise_offset"])])
 
@@ -549,6 +555,9 @@ class LoRATrainer:
             self.logger.info(f"Script: sdxl_train_network.py")
             self.logger.info(f"Dataset: {dataset_dir.name}")
             self.logger.info(f"Imágenes: {len(dataset_images)}")
+            self.logger.info(
+                f"FLAGS ANTI-NaN: scale_v_pred_loss_like_noise_pred, min_snr_gamma={advanced_config.get('min_snr_gamma', 'N/A')}"
+            )
 
             return cmd
 
@@ -624,10 +633,24 @@ class LoRATrainer:
                                 last_checkpoint_time = current_time
 
                     # Solo mostrar líneas importantes
-                    important_keywords = ["error", "saved", "checkpoint", "epoch"]
+                    important_keywords = [
+                        "error",
+                        "saved",
+                        "checkpoint",
+                        "epoch",
+                        "loss",
+                    ]
                     if any(keyword in line.lower() for keyword in important_keywords):
-                        clean_line = "".join(char for char in line if ord(char) < 128)
-                        print(f"📝 {clean_line}")
+                        # Mostrar pérdida si está disponible
+                        if "loss" in line.lower() and "nan" not in line.lower():
+                            clean_line = "".join(
+                                char for char in line if ord(char) < 128
+                            )
+                            print(f"📝 {clean_line}")
+                        elif "nan" in line.lower():
+                            print(
+                                f"⚠️ WARNING: NaN detectado en training - verificar configuración"
+                            )
 
                     try:
                         self.logger.info(f"TRAINING: {line}")
@@ -732,9 +755,7 @@ class LoRATrainer:
 
         input("Presiona Enter para continuar...")
 
-    # [RESTO DE MÉTODOS SIN CAMBIOS - continúan igual que en la versión original]
-    # _validate_dataset, _analyze_dataset, _get_gpu_info, etc.
-
+    # [Métodos auxiliares - sin cambios necesarios]
     def _validate_dataset(self, dataset_dir: Path) -> bool:
         """Valida que el dataset esté listo"""
         if not dataset_dir.exists():

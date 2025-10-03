@@ -551,6 +551,6 @@ Para reportar bugs o solicitar características:
 
 ---
 
-**Avatar Pipeline v4.0** - Sistema Profesional de Entrenamiento LoRA para Avatares SDXL
+**Avatar Pipeline v1.0** - Sistema Profesional de Entrenamiento LoRA para Avatares SDXL
 
 *Última actualización: Septiembre 2025*

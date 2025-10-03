@@ -1,6 +1,8 @@
 # Avatar Pipeline - GTX 1650 4GB + Python 3.11
-# PASO CRÍTICO: Instalar PyTorch PRIMERO (antes de este archivo):
-# pip install torch==2.1.2 torchvision==0.16.2 torchaudio==2.1.2 --index-url https://download.pytorch.org/whl/cu118
+# 
+# INSTALACIÓN:
+# 1. pip install torch==2.1.1 torchvision==0.16.1 torchaudio==2.1.1 --index-url https://download.pytorch.org/whl/cu118
+# 2. pip install -r requirements.txt
 
 # FACE DETECTION - CPU only para liberar VRAM
 tensorflow-cpu==2.15.1
@@ -25,10 +27,13 @@ accelerate==0.27.2
 safetensors==0.4.1
 
 # XFORMERS - CRÍTICO para 4GB VRAM
+# IMPORTANTE: Requiere torch==2.1.1 (NO 2.1.2)
 xformers==0.0.23.post1
 
 # BITSANDBYTES - 8-bit optimizations
-bitsandbytes==0.41.1
+# Windows requiere versión especial
+bitsandbytes-windows==0.37.5; sys_platform == "win32"
+bitsandbytes==0.41.1; sys_platform != "win32"
 
 # OPTIMIZERS
 dadaptation==3.1
