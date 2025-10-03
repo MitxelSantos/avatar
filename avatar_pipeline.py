@@ -27,6 +27,7 @@ except ImportError as e:
     print("Asegúrate de que todos los archivos estén en el mismo directorio")
     sys.exit(1)
 
+
 class AvatarPipeline:
     def __init__(self):
         self.base_dir = Path(".")

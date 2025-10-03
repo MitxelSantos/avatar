@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-lora_trainer.py - Entrenador LoRA COMPLETO Y CORREGIDO
-Versión 5.0 - Con flags anti-NaN y optimizaciones para GTX 1650
+lora_trainer.py - Entrenador LoRA CORREGIDO PARA SDXL
+Versión 5.1 - Sin flags incompatibles, solo estrategias anti-NaN para SDXL
 """
 
 import os
@@ -135,9 +135,14 @@ class LoRATrainer:
 
     def start_training(self, client_id: str, clients_dir: Path) -> bool:
         """Inicia entrenamiento LoRA REAL con validación exhaustiva"""
-        print(f"\n🚀 INICIANDO ENTRENAMIENTO LORA REAL")
+        print(f"\nINICIANDO ENTRENAMIENTO LORA REAL")
         print(f"Cliente: {client_id}")
         print("=" * 50)
+
+        # CRÍTICO: Matar procesos Python huérfanos antes de entrenar
+        print(f"\nLIMPIANDO PROCESOS PREVIOS")
+        print("-" * 25)
+        self._kill_orphan_processes()
 
         self.logger.info(f"Iniciando entrenamiento LoRA REAL para cliente: {client_id}")
 
@@ -299,7 +304,7 @@ class LoRATrainer:
         kohya_dir = Path("./kohya_ss")
 
         if not kohya_dir.exists():
-            print(f"📥 Clonando Kohya_ss...")
+            print(f"Clonando Kohya_ss...")
             try:
                 subprocess.run(
                     [
@@ -311,24 +316,73 @@ class LoRATrainer:
                     check=True,
                     capture_output=True,
                 )
-                print(f"✅ Kohya_ss clonado")
+                print(f"Kohya_ss clonado")
             except:
-                print(f"❌ Error clonando Kohya_ss")
+                print(f"Error clonando Kohya_ss")
                 return False
 
         train_script = kohya_dir / "sdxl_train_network.py"
         if train_script.exists():
-            print(f"✅ Kohya_ss configurado")
+            print(f"Kohya_ss configurado")
             self.kohya_path = kohya_dir
             return True
         else:
-            print(f"❌ sdxl_train_network.py no encontrado")
+            print(f"sdxl_train_network.py no encontrado")
             return False
+
+    def _kill_orphan_processes(self):
+        """Mata procesos Python huérfanos que puedan interferir con el entrenamiento"""
+        try:
+            import psutil
+
+            current_pid = os.getpid()
+            killed_count = 0
+
+            print(f"Buscando procesos Python conflictivos...")
+
+            for proc in psutil.process_iter(["pid", "name", "cmdline"]):
+                try:
+                    # Saltar el proceso actual
+                    if proc.info["pid"] == current_pid:
+                        continue
+
+                    # Buscar procesos Python relacionados con training
+                    if proc.info["name"] and "python" in proc.info["name"].lower():
+                        cmdline = proc.info["cmdline"]
+                        if cmdline:
+                            cmdline_str = " ".join(cmdline).lower()
+
+                            # Si encuentra procesos relacionados con sdxl_train o kohya
+                            if any(
+                                keyword in cmdline_str
+                                for keyword in ["sdxl_train", "train_network", "kohya"]
+                            ):
+                                print(
+                                    f"  Matando proceso huérfano PID {proc.info['pid']}: {proc.info['name']}"
+                                )
+                                proc.kill()
+                                killed_count += 1
+
+                except (psutil.NoSuchProcess, psutil.AccessDenied):
+                    continue
+
+            if killed_count > 0:
+                print(f"Procesos eliminados: {killed_count}")
+                time.sleep(2)  # Esperar a que los procesos terminen
+            else:
+                print(f"No se encontraron procesos conflictivos")
+
+        except ImportError:
+            print(f"ADVERTENCIA: psutil no disponible, no se pueden limpiar procesos")
+            print(f"Instalar con: pip install psutil")
+        except Exception as e:
+            print(f"ADVERTENCIA: Error limpiando procesos: {e}")
+            print(f"Continuando de todas formas...")
 
     def _execute_real_training(
         self, config: Dict, client_path: Path, client_id: str
     ) -> bool:
-        """Ejecuta entrenamiento LoRA REAL usando Kohya_ss - VERSIÓN CON FLAGS ANTI-NaN"""
+        """Ejecuta entrenamiento LoRA REAL usando Kohya_ss"""
 
         self.training_state.update(
             {
@@ -345,6 +399,10 @@ class LoRATrainer:
             models_dir.mkdir(parents=True, exist_ok=True)
             logs_dir.mkdir(parents=True, exist_ok=True)
 
+            # ⭐ CRÍTICO: Convertir a rutas absolutas
+            models_dir = models_dir.resolve()
+            logs_dir = logs_dir.resolve()
+
             print(f"🔧 Generando comando de entrenamiento...")
 
             # Buscar dataset con detección automática
@@ -353,6 +411,8 @@ class LoRATrainer:
 
             if matching_dirs:
                 dataset_dir = matching_dirs[0]
+                # ⭐ CRÍTICO: Convertir a ruta absoluta
+                dataset_dir = dataset_dir.resolve()
             else:
                 print(f"❌ No se encontró dataset con formato correcto")
                 return False
@@ -366,9 +426,14 @@ class LoRATrainer:
                 return False
 
             print(f"📋 Comando de entrenamiento generado ({len(cmd)} argumentos)")
+            print(f"🗂️  Dataset: {dataset_dir}")
+            print(f"💾 Modelos: {models_dir}")
+            print(f"📊 Logs: {logs_dir}")
 
             original_cwd = os.getcwd()
+            print(f"📁 Directorio actual: {original_cwd}")
             os.chdir(self.kohya_path)
+            print(f"📁 Cambiando a: {self.kohya_path.resolve()}")
 
             try:
                 # Variables de entorno para suprimir warnings
@@ -418,7 +483,7 @@ class LoRATrainer:
     ) -> List[str]:
         """
         Construye comando Kohya_ss CORREGIDO para SDXL
-        VERSIÓN 5.0: Con flags anti-NaN agregados
+        VERSIÓN 5.1: SIN scale_v_pred_loss_like_noise_pred (incompatible con SDXL)
         """
         try:
             model_config = config["model_config"]
@@ -434,7 +499,11 @@ class LoRATrainer:
             # Usar directorio padre para Kohya_ss
             if dataset_dir.parent.name == "training_data":
                 training_data_parent = dataset_dir.parent
-                self.logger.info(f"Usando training_data parent: {training_data_parent}")
+                # ⭐ CRÍTICO: Convertir a ruta ABSOLUTA antes de pasar a Kohya_ss
+                training_data_parent = training_data_parent.resolve()
+                self.logger.info(
+                    f"Usando training_data parent (absoluta): {training_data_parent}"
+                )
             else:
                 self.logger.error(f"Estructura de directorio inesperada: {dataset_dir}")
                 return []
@@ -448,13 +517,19 @@ class LoRATrainer:
             self.logger.info(f"Dataset verificado: {dataset_dir.name}")
             self.logger.info(f"Imágenes encontradas: {len(dataset_images)}")
 
-            # COMANDO OPTIMIZADO PARA SDXL CON FLAGS ANTI-NaN
+            # ⭐ DEBUG: Mostrar ruta completa que se pasará a Kohya_ss
+            training_data_posix = training_data_parent.as_posix()
+            self.logger.info(f"Ruta Kohya_ss (POSIX): {training_data_posix}")
+            print(f"🔍 Ruta para Kohya_ss: {training_data_posix}")
+
+            # COMANDO OPTIMIZADO PARA SDXL - SIN FLAGS INCOMPATIBLES
             cmd = [
                 sys.executable,
                 "sdxl_train_network.py",
                 # Dataset - Directorio padre (Kohya detecta subdirectorios)
+                # ⭐ CRÍTICO: Usar .as_posix() para forward slashes en Windows
                 "--train_data_dir",
-                str(training_data_parent),
+                training_data_parent.as_posix(),
                 "--resolution",
                 f"{dataset_config['resolution']},{dataset_config['resolution']}",
                 "--train_batch_size",
@@ -488,11 +563,10 @@ class LoRATrainer:
                 "--gradient_checkpointing",
                 "--cache_latents",
                 "--no_half_vae",  # CRÍTICO: evita NaN en latents
-                # FLAGS ANTI-NaN AGREGADOS
-                "--scale_v_pred_loss_like_noise_pred",  # Previene NaN en VAE
                 # Guardado
+                # ⭐ CRÍTICO: Usar .as_posix() para forward slashes
                 "--output_dir",
-                str(output_dir),
+                output_dir.as_posix(),
                 "--output_name",
                 save_config["output_name"],
                 "--save_model_as",
@@ -502,8 +576,9 @@ class LoRATrainer:
                 "--save_precision",
                 save_config["save_precision"],
                 # Logging
+                # ⭐ CRÍTICO: Usar .as_posix() para forward slashes
                 "--logging_dir",
-                str(logs_dir),
+                logs_dir.as_posix(),
                 "--log_with",
                 "tensorboard",
             ]
@@ -520,13 +595,42 @@ class LoRATrainer:
             if training_config.get("max_grad_norm"):
                 cmd.extend(["--max_grad_norm", str(training_config["max_grad_norm"])])
 
-            # FLAGS AVANZADOS ANTI-NaN
+            # FLAGS CRÍTICOS ANTI-MULTIPROCESS (previene procesos múltiples)
+            if memory_opts.get("max_data_loader_n_workers") is not None:
+                cmd.extend(
+                    [
+                        "--max_data_loader_n_workers",
+                        str(memory_opts["max_data_loader_n_workers"]),
+                    ]
+                )
+                self.logger.info(
+                    f"Usando max_data_loader_n_workers={memory_opts['max_data_loader_n_workers']} (previene procesos múltiples)"
+                )
+
+            if memory_opts.get("persistent_data_loader_workers") is False:
+                # No agregar flag si es False (comportamiento por defecto)
+                self.logger.info(
+                    "Usando persistent_data_loader_workers=False (evita workers persistentes)"
+                )
+
+            # FLAGS ANTI-NaN COMPATIBLES CON SDXL
+            # ⭐ IMPORTANTE: NO usar scale_v_pred_loss_like_noise_pred (requiere v_parameterization)
+
+            # min_snr_gamma: Recomendado para SDXL, ayuda con estabilidad
             if advanced_config.get("min_snr_gamma"):
                 cmd.extend(["--min_snr_gamma", str(advanced_config["min_snr_gamma"])])
+                self.logger.info(
+                    f"Usando min_snr_gamma={advanced_config['min_snr_gamma']} para estabilidad"
+                )
 
+            # noise_offset: Mejora contraste, compatible con SDXL
             if advanced_config.get("noise_offset"):
                 cmd.extend(["--noise_offset", str(advanced_config["noise_offset"])])
+                self.logger.info(
+                    f"Usando noise_offset={advanced_config['noise_offset']}"
+                )
 
+            # adaptive_noise_scale: Opcional, para GPUs más potentes
             if advanced_config.get("adaptive_noise_scale"):
                 cmd.extend(
                     [
@@ -535,6 +639,7 @@ class LoRATrainer:
                     ]
                 )
 
+            # multires_noise: Mejora detalles finos
             if advanced_config.get("multires_noise_iterations"):
                 cmd.extend(
                     [
@@ -556,7 +661,7 @@ class LoRATrainer:
             self.logger.info(f"Dataset: {dataset_dir.name}")
             self.logger.info(f"Imágenes: {len(dataset_images)}")
             self.logger.info(
-                f"FLAGS ANTI-NaN: scale_v_pred_loss_like_noise_pred, min_snr_gamma={advanced_config.get('min_snr_gamma', 'N/A')}"
+                f"FLAGS ANTI-NaN COMPATIBLES: min_snr_gamma={advanced_config.get('min_snr_gamma', 'N/A')}, noise_offset={advanced_config.get('noise_offset', 'N/A')}"
             )
 
             return cmd
@@ -755,7 +860,8 @@ class LoRATrainer:
 
         input("Presiona Enter para continuar...")
 
-    # [Métodos auxiliares - sin cambios necesarios]
+    # === MÉTODOS AUXILIARES (sin cambios desde versión anterior) ===
+
     def _validate_dataset(self, dataset_dir: Path) -> bool:
         """Valida que el dataset esté listo"""
         if not dataset_dir.exists():
@@ -892,10 +998,11 @@ class LoRATrainer:
             print(f"   Learning Rate: {preset['learning_rate']}")
 
             if self.detected_gpu_profile:
-                gpu_multiplier = (
-                    3600 / self.detected_gpu_profile.steps_per_hour_estimate
+                # ⭐ CORREGIDO: Tiempo = steps / steps_per_hour (NO al revés)
+                total_hours = (
+                    preset["max_train_steps"]
+                    / self.detected_gpu_profile.steps_per_hour_estimate
                 )
-                total_hours = preset["max_train_steps"] * gpu_multiplier
                 print(f"   Tiempo estimado: {total_hours:.1f} horas")
 
         print(f"\n{len(presets) + 1}. ⚙️ Configuración personalizada")
@@ -960,7 +1067,7 @@ class LoRATrainer:
     def _generate_training_config(
         self, client_id: str, preset: Dict, dataset_info: Dict, gpu_info: Dict
     ) -> Dict[str, Any]:
-        """Genera configuración completa de entrenamiento"""
+        """Genera configuración completa de entrenamiento CON overrides de presets"""
         gpu_profile = gpu_info.get("profile") or self.config.gpu_profiles["low_end"]
 
         dataset_repeats = max(
@@ -972,6 +1079,9 @@ class LoRATrainer:
                 // dataset_info["total_images"],
             ),
         )
+
+        # Obtener overrides avanzados del preset si existen
+        advanced_overrides = preset.get("advanced_overrides", {})
 
         config = {
             "client_id": client_id,
@@ -1003,10 +1113,15 @@ class LoRATrainer:
                 "max_train_steps": preset["max_train_steps"],
                 "learning_rate": preset["learning_rate"],
                 "train_batch_size": gpu_profile.batch_size,
-                "lr_scheduler": "cosine_with_restarts",
-                "lr_warmup_steps": int(preset["max_train_steps"] * 0.1),
+                "lr_scheduler": advanced_overrides.get(
+                    "lr_scheduler", "cosine_with_restarts"
+                ),
+                "lr_warmup_steps": int(
+                    preset["max_train_steps"]
+                    * advanced_overrides.get("lr_warmup_ratio", 0.1)
+                ),
                 "optimizer_type": gpu_profile.optimizer,
-                "weight_decay": 0.01,
+                "weight_decay": advanced_overrides.get("weight_decay", 0.01),
                 "max_grad_norm": 1.0,
                 "gradient_accumulation_steps": gpu_profile.gradient_accumulation_steps,
             },
@@ -1022,7 +1137,10 @@ class LoRATrainer:
                 "keep_tokens": 1,
             },
             "advanced_config": {
-                "noise_offset": 0.1 if gpu_profile.conv_lora else 0.05,
+                "min_snr_gamma": advanced_overrides.get("min_snr_gamma", 5),
+                "noise_offset": advanced_overrides.get(
+                    "noise_offset", 0.1 if gpu_profile.conv_lora else 0.05
+                ),
                 "adaptive_noise_scale": 0.05 if gpu_profile.conv_lora else None,
                 "multires_noise_iterations": 4 if gpu_profile.conv_lora else 0,
                 "multires_noise_discount": 0.3 if gpu_profile.conv_lora else 0,
@@ -1057,6 +1175,7 @@ class LoRATrainer:
         print(f"   Batch size: {training_config['train_batch_size']}")
 
         if gpu_info.get("profile"):
+            # ⭐ CORREGIDO: Tiempo = steps / steps_per_hour
             total_hours = (
                 training_config["max_train_steps"]
                 / gpu_info["profile"].steps_per_hour_estimate

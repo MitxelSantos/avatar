@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 config.py - Configuración centralizada del sistema Avatar Pipeline
-Versión 3.1 - CORREGIDO: GTX 1650 usa 768x768 (NO 1024)
+Versión 3.2 - CORREGIDO: Preset Producción Profesional optimizado
 """
 
 import os
@@ -116,7 +116,7 @@ class AvatarPipelineConfig:
                     "medvram": True,
                     "xformers_memory_efficient_attention": True,
                     "attention_slicing": True,
-                    "cpu_offload": False,  # No CPU offload para mantener velocidad
+                    "cpu_offload": False,
                 },
             ),
             "rtx_3050": GPUProfile(
@@ -222,7 +222,7 @@ class AvatarPipelineConfig:
                 network_dim=32,
                 network_alpha=16,
                 batch_size=1,
-                resolution=768,  # ⭐ CRÍTICO: 768 para GPUs 4GB
+                resolution=768,
                 optimizer="AdamW8bit",
                 conv_lora=False,
                 gradient_accumulation_steps=8,
@@ -266,31 +266,31 @@ class AvatarPipelineConfig:
         }
 
     def _init_training_presets(self) -> Dict[str, Dict[str, Any]]:
-        """Presets de entrenamiento - INCLUYE PRESETS GTX 1650 OPTIMIZADOS"""
+        """Presets de entrenamiento - OPTIMIZADO: Producción Profesional mejorado"""
         return {
             "gtx1650_quick": {
-                "name": "GTX 1650 - Rápido (6-8 horas)",
-                "max_train_steps": 1000,
-                "learning_rate": 0.00015,
+                "name": "GTX 1650 - Rápido (3-4 horas)",
+                "max_train_steps": 500,  # Reducido para testing
+                "learning_rate": 0.00008,  # MÁS BAJO - evita NaN
                 "dataset_repeats_multiplier": 250,
-                "save_every_n_steps": 250,
-                "description": "Pruebas rápidas GTX 1650 @ 768x768",
+                "save_every_n_steps": 125,
+                "description": "Pruebas ultrarrápidas GTX 1650 @ 768x768 (parámetros estables)",
             },
             "gtx1650_balanced": {
-                "name": "GTX 1650 - Equilibrado (10-14 horas)",
-                "max_train_steps": 1500,
-                "learning_rate": 0.00012,
+                "name": "GTX 1650 - Equilibrado (6-8 horas)",
+                "max_train_steps": 1000,
+                "learning_rate": 0.00008,  # MÁS BAJO - evita NaN
                 "dataset_repeats_multiplier": 200,
-                "save_every_n_steps": 300,
-                "description": "Balance calidad/tiempo GTX 1650 @ 768x768",
+                "save_every_n_steps": 250,
+                "description": "Balance calidad/tiempo GTX 1650 @ 768x768 (estable)",
             },
             "gtx1650_quality": {
-                "name": "GTX 1650 - Alta Calidad (14-18 horas)",
-                "max_train_steps": 2000,
-                "learning_rate": 0.0001,
+                "name": "GTX 1650 - Alta Calidad (10-12 horas)",
+                "max_train_steps": 1500,
+                "learning_rate": 0.00006,  # AÚN MÁS BAJO para convergencia suave
                 "dataset_repeats_multiplier": 150,
-                "save_every_n_steps": 400,
-                "description": "Máxima calidad GTX 1650 @ 768x768",
+                "save_every_n_steps": 300,
+                "description": "Máxima calidad GTX 1650 @ 768x768 (ultra estable)",
             },
             "quick": {
                 "name": "Entrenamiento Rápido",
@@ -319,10 +319,18 @@ class AvatarPipelineConfig:
             "production": {
                 "name": "Producción Profesional",
                 "max_train_steps": 4000,
-                "learning_rate": 0.00008,
+                "learning_rate": 0.00006,  # ⭐ MÁS BAJO para convergencia suave
                 "dataset_repeats_multiplier": 100,
                 "save_every_n_steps": 200,
-                "description": "Para uso comercial profesional",
+                "description": "⭐ CALIDAD MÁXIMA - Parámetros óptimos para uso profesional",
+                # Parámetros avanzados específicos para producción
+                "advanced_overrides": {
+                    "min_snr_gamma": 5,  # Estabilidad máxima
+                    "noise_offset": 0.15,  # Mejor contraste y detalles
+                    "lr_scheduler": "cosine_with_restarts",
+                    "lr_warmup_ratio": 0.1,  # 10% warmup
+                    "weight_decay": 0.005,  # Regularización más fuerte
+                },
             },
         }
 
