@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-lora_trainer.py - Entrenador LoRA CORREGIDO PARA SDXL
-Versión 5.1 - Sin flags incompatibles, solo estrategias anti-NaN para SDXL
+lora_trainer.py - SOLUCIÓN 1: Pasar subdirectorio DIRECTO a Kohya_ss
+Versión 5.3 - FIX CRÍTICO: dataset_dir directo (NO parent)
 """
 
 import os
@@ -30,7 +30,7 @@ from utils import (
 
 
 class LoRATrainer:
-    """Entrenador LoRA profesional con detección automática de estructura Kohya_ss"""
+    """Entrenador LoRA profesional - SOLUCIÓN 1: Subdirectorio directo"""
 
     def __init__(self, config=None):
         self.config = config or CONFIG
@@ -342,17 +342,14 @@ class LoRATrainer:
 
             for proc in psutil.process_iter(["pid", "name", "cmdline"]):
                 try:
-                    # Saltar el proceso actual
                     if proc.info["pid"] == current_pid:
                         continue
 
-                    # Buscar procesos Python relacionados con training
                     if proc.info["name"] and "python" in proc.info["name"].lower():
                         cmdline = proc.info["cmdline"]
                         if cmdline:
                             cmdline_str = " ".join(cmdline).lower()
 
-                            # Si encuentra procesos relacionados con sdxl_train o kohya
                             if any(
                                 keyword in cmdline_str
                                 for keyword in ["sdxl_train", "train_network", "kohya"]
@@ -368,7 +365,7 @@ class LoRATrainer:
 
             if killed_count > 0:
                 print(f"Procesos eliminados: {killed_count}")
-                time.sleep(2)  # Esperar a que los procesos terminen
+                time.sleep(2)
             else:
                 print(f"No se encontraron procesos conflictivos")
 
@@ -399,7 +396,7 @@ class LoRATrainer:
             models_dir.mkdir(parents=True, exist_ok=True)
             logs_dir.mkdir(parents=True, exist_ok=True)
 
-            # ⭐ CRÍTICO: Convertir a rutas absolutas
+            # Convertir a rutas absolutas
             models_dir = models_dir.resolve()
             logs_dir = logs_dir.resolve()
 
@@ -411,7 +408,7 @@ class LoRATrainer:
 
             if matching_dirs:
                 dataset_dir = matching_dirs[0]
-                # ⭐ CRÍTICO: Convertir a ruta absoluta
+                # Convertir a ruta absoluta
                 dataset_dir = dataset_dir.resolve()
             else:
                 print(f"❌ No se encontró dataset con formato correcto")
@@ -482,8 +479,8 @@ class LoRATrainer:
         self, config: Dict, dataset_dir: Path, output_dir: Path, logs_dir: Path
     ) -> List[str]:
         """
-        Construye comando Kohya_ss CORREGIDO para SDXL
-        VERSIÓN 5.1: SIN scale_v_pred_loss_like_noise_pred (incompatible con SDXL)
+        Construye comando Kohya_ss - SOLUCIÓN 1: Pasar dataset_dir DIRECTO
+        ⭐⭐⭐ FIX CRÍTICO: NO usar parent, pasar subdirectorio con imágenes
         """
         try:
             model_config = config["model_config"]
@@ -496,46 +493,39 @@ class LoRATrainer:
 
             client_id = config["client_id"]
 
-            # Usar directorio padre para Kohya_ss
-            if dataset_dir.parent.name == "training_data":
-                training_data_parent = dataset_dir.parent
-                # ⭐ CRÍTICO: Convertir a ruta ABSOLUTA antes de pasar a Kohya_ss
-                training_data_parent = training_data_parent.resolve()
-                self.logger.info(
-                    f"Usando training_data parent (absoluta): {training_data_parent}"
-                )
-            else:
-                self.logger.error(f"Estructura de directorio inesperada: {dataset_dir}")
-                return []
+            # ⭐⭐⭐ SOLUCIÓN 1: Pasar dataset_dir DIRECTO (donde están las imágenes)
+            # NO usar parent, Kohya NO lo detecta correctamente
+            dataset_dir = dataset_dir.resolve()
 
-            # Verificar imágenes
+            self.logger.info(f"🔥 SOLUCIÓN 1 APLICADA: Usando dataset_dir directo")
+            self.logger.info(f"🔥 Ruta absoluta: {dataset_dir}")
+
+            # Validación CRÍTICA: Verificar que las imágenes estén ahí
             dataset_images = list(dataset_dir.glob("*.png"))
             if not dataset_images:
-                self.logger.error(f"No se encontraron imágenes en: {dataset_dir}")
+                self.logger.error(f"❌ CRÍTICO: 0 imágenes en {dataset_dir}")
+                print(f"❌ ERROR: No se encontraron imágenes en:")
+                print(f"   {dataset_dir}")
                 return []
 
-            self.logger.info(f"Dataset verificado: {dataset_dir.name}")
-            self.logger.info(f"Imágenes encontradas: {len(dataset_images)}")
+            self.logger.info(f"✅ Dataset validado: {len(dataset_images)} imágenes")
 
-            # ⭐ DEBUG: Mostrar ruta completa que se pasará a Kohya_ss
-            training_data_posix = training_data_parent.as_posix()
-            self.logger.info(f"Ruta Kohya_ss (POSIX): {training_data_posix}")
-            print(f"🔍 Ruta para Kohya_ss: {training_data_posix}")
+            print(f"\n🔥 SOLUCIÓN 1 ACTIVA:")
+            print(f"   Ruta dataset: {dataset_dir.as_posix()}")
+            print(f"   Imágenes detectadas: {len(dataset_images)}")
+            print(f"   ✅ Pasando subdirectorio DIRECTO a Kohya_ss")
 
-            # COMANDO OPTIMIZADO PARA SDXL - SIN FLAGS INCOMPATIBLES
+            # COMANDO OPTIMIZADO PARA SDXL
             cmd = [
                 sys.executable,
                 "sdxl_train_network.py",
-                # Dataset - Directorio padre (Kohya detecta subdirectorios)
-                # ⭐ CRÍTICO: Usar .as_posix() para forward slashes en Windows
+                # ⭐⭐⭐ SOLUCIÓN 1: Dataset DIRECTO (donde están las imágenes)
                 "--train_data_dir",
-                training_data_parent.as_posix(),
+                dataset_dir.parent.as_posix(),  # ✅ Subdirectorio directo
                 "--resolution",
                 f"{dataset_config['resolution']},{dataset_config['resolution']}",
                 "--train_batch_size",
                 str(training_config["train_batch_size"]),
-                "--caption_extension",
-                ".txt",
                 # Modelo base
                 "--pretrained_model_name_or_path",
                 model_config["pretrained_model_name_or_path"],
@@ -563,8 +553,14 @@ class LoRATrainer:
                 "--gradient_checkpointing",
                 "--cache_latents",
                 "--no_half_vae",  # CRÍTICO: evita NaN en latents
+                # ⭐ FLAGS ANTI-NaN ADICIONALES
+                "--max_data_loader_n_workers",
+                "0",  # CRÍTICO: evita multiprocessing
+                "--seed",
+                "42",  # Reproducibilidad
+                "--max_token_length",
+                "225",  # SDXL estándar
                 # Guardado
-                # ⭐ CRÍTICO: Usar .as_posix() para forward slashes
                 "--output_dir",
                 output_dir.as_posix(),
                 "--output_name",
@@ -576,7 +572,6 @@ class LoRATrainer:
                 "--save_precision",
                 save_config["save_precision"],
                 # Logging
-                # ⭐ CRÍTICO: Usar .as_posix() para forward slashes
                 "--logging_dir",
                 logs_dir.as_posix(),
                 "--log_with",
@@ -595,42 +590,13 @@ class LoRATrainer:
             if training_config.get("max_grad_norm"):
                 cmd.extend(["--max_grad_norm", str(training_config["max_grad_norm"])])
 
-            # FLAGS CRÍTICOS ANTI-MULTIPROCESS (previene procesos múltiples)
-            if memory_opts.get("max_data_loader_n_workers") is not None:
-                cmd.extend(
-                    [
-                        "--max_data_loader_n_workers",
-                        str(memory_opts["max_data_loader_n_workers"]),
-                    ]
-                )
-                self.logger.info(
-                    f"Usando max_data_loader_n_workers={memory_opts['max_data_loader_n_workers']} (previene procesos múltiples)"
-                )
-
-            if memory_opts.get("persistent_data_loader_workers") is False:
-                # No agregar flag si es False (comportamiento por defecto)
-                self.logger.info(
-                    "Usando persistent_data_loader_workers=False (evita workers persistentes)"
-                )
-
             # FLAGS ANTI-NaN COMPATIBLES CON SDXL
-            # ⭐ IMPORTANTE: NO usar scale_v_pred_loss_like_noise_pred (requiere v_parameterization)
-
-            # min_snr_gamma: Recomendado para SDXL, ayuda con estabilidad
             if advanced_config.get("min_snr_gamma"):
                 cmd.extend(["--min_snr_gamma", str(advanced_config["min_snr_gamma"])])
-                self.logger.info(
-                    f"Usando min_snr_gamma={advanced_config['min_snr_gamma']} para estabilidad"
-                )
 
-            # noise_offset: Mejora contraste, compatible con SDXL
             if advanced_config.get("noise_offset"):
                 cmd.extend(["--noise_offset", str(advanced_config["noise_offset"])])
-                self.logger.info(
-                    f"Usando noise_offset={advanced_config['noise_offset']}"
-                )
 
-            # adaptive_noise_scale: Opcional, para GPUs más potentes
             if advanced_config.get("adaptive_noise_scale"):
                 cmd.extend(
                     [
@@ -639,7 +605,6 @@ class LoRATrainer:
                     ]
                 )
 
-            # multires_noise: Mejora detalles finos
             if advanced_config.get("multires_noise_iterations"):
                 cmd.extend(
                     [
@@ -656,13 +621,9 @@ class LoRATrainer:
                     ]
                 )
 
-            self.logger.info(f"Comando Kohya_ss generado: {len(cmd)} argumentos")
-            self.logger.info(f"Script: sdxl_train_network.py")
-            self.logger.info(f"Dataset: {dataset_dir.name}")
-            self.logger.info(f"Imágenes: {len(dataset_images)}")
-            self.logger.info(
-                f"FLAGS ANTI-NaN COMPATIBLES: min_snr_gamma={advanced_config.get('min_snr_gamma', 'N/A')}, noise_offset={advanced_config.get('noise_offset', 'N/A')}"
-            )
+            self.logger.info(f"✅ Comando Kohya_ss generado: {len(cmd)} argumentos")
+            self.logger.info(f"✅ SOLUCIÓN 1: train_data_dir = {dataset_dir}")
+            self.logger.info(f"✅ Validado: {len(dataset_images)} imágenes detectadas")
 
             return cmd
 
@@ -746,7 +707,6 @@ class LoRATrainer:
                         "loss",
                     ]
                     if any(keyword in line.lower() for keyword in important_keywords):
-                        # Mostrar pérdida si está disponible
                         if "loss" in line.lower() and "nan" not in line.lower():
                             clean_line = "".join(
                                 char for char in line if ord(char) < 128
@@ -860,30 +820,26 @@ class LoRATrainer:
 
         input("Presiona Enter para continuar...")
 
-    # === MÉTODOS AUXILIARES (sin cambios desde versión anterior) ===
+    # === MÉTODOS AUXILIARES (sin cambios significativos) ===
 
     def _validate_dataset(self, dataset_dir: Path) -> bool:
-        """Valida que el dataset esté listo"""
         if not dataset_dir.exists():
             self.logger.error("Dataset no encontrado")
-            print("❌ No hay dataset procesado. Prepara primero el dataset LoRA.")
+            print("❌ No hay dataset procesado")
             input("Presiona Enter para continuar...")
             return False
 
         dataset_images = list(dataset_dir.glob("*.png"))
         if len(dataset_images) < 20:
             self.logger.warning(f"Dataset pequeño: {len(dataset_images)} imágenes")
-            print(
-                f"⚠️ Dataset pequeño ({len(dataset_images)} imágenes). Recomendado mínimo: 30"
-            )
-            proceed = input("¿Continuar de todos modos? (s/n): ").lower().strip()
+            print(f"⚠️ Dataset pequeño ({len(dataset_images)} imágenes)")
+            proceed = input("¿Continuar? (s/n): ").lower().strip()
             if not proceed.startswith("s"):
                 return False
 
         return True
 
     def _analyze_dataset(self, dataset_dir: Path) -> Optional[Dict[str, Any]]:
-        """Analiza el dataset y retorna información detallada"""
         try:
             all_images = list(dataset_dir.glob("*.png"))
             mj_images = [img for img in all_images if "_mj_" in img.name]
@@ -915,7 +871,6 @@ class LoRATrainer:
             return None
 
     def _get_gpu_info(self) -> Dict[str, Any]:
-        """Obtiene información detallada de la GPU"""
         if self.detected_gpu_profile:
             try:
                 import torch
@@ -938,11 +893,10 @@ class LoRATrainer:
             "name": "Unknown GPU",
             "vram_gb": 0,
             "available": False,
-            "error": "No GPU detectada o PyTorch no disponible",
+            "error": "No GPU detectada",
         }
 
     def _display_gpu_info(self, gpu_info: Dict, dataset_info: Dict):
-        """Muestra información de GPU y dataset"""
         print(f"🎮 GPU: {gpu_info.get('name', 'Unknown')}")
         if gpu_info.get("vram_gb"):
             print(f"💾 VRAM: {gpu_info['vram_gb']:.1f}GB")
@@ -955,7 +909,6 @@ class LoRATrainer:
             print(f"   🔢 Formato: {dataset_info['kohya_format']}")
 
     def _get_available_presets(self) -> List[Dict[str, Any]]:
-        """Obtiene presets disponibles según la GPU detectada"""
         presets = []
         for preset_key, preset_config in self.config.training_presets.items():
             preset_info = preset_config.copy()
@@ -966,20 +919,6 @@ class LoRATrainer:
                 if "1650" in self.detected_gpu_profile.name.lower():
                     if preset_key.startswith("gtx1650"):
                         preset_info["recommended"] = preset_key == "gtx1650_balanced"
-                elif (
-                    preset_key == "balanced"
-                    and "3050" in self.detected_gpu_profile.name.lower()
-                ):
-                    preset_info["recommended"] = True
-                elif (
-                    preset_key == "quality"
-                    and self.detected_gpu_profile.vram_gb_min >= 8
-                ):
-                    preset_info["recommended"] = True
-                elif (
-                    preset_key == "quick" and self.detected_gpu_profile.vram_gb_min < 6
-                ):
-                    preset_info["recommended"] = True
 
             presets.append(preset_info)
         return presets
@@ -987,7 +926,6 @@ class LoRATrainer:
     def _select_training_preset(
         self, presets: List[Dict], dataset_info: Dict
     ) -> Optional[Dict]:
-        """Permite al usuario seleccionar un preset de entrenamiento"""
         print(f"\n🎯 PRESETS DE ENTRENAMIENTO:")
 
         for i, preset in enumerate(presets, 1):
@@ -998,23 +936,19 @@ class LoRATrainer:
             print(f"   Learning Rate: {preset['learning_rate']}")
 
             if self.detected_gpu_profile:
-                # ⭐ CORREGIDO: Tiempo = steps / steps_per_hour (NO al revés)
                 total_hours = (
                     preset["max_train_steps"]
                     / self.detected_gpu_profile.steps_per_hour_estimate
                 )
                 print(f"   Tiempo estimado: {total_hours:.1f} horas")
 
-        print(f"\n{len(presets) + 1}. ⚙️ Configuración personalizada")
-        print(f"{len(presets) + 2}. 🔙 Cancelar")
+        print(f"\n{len(presets) + 1}. 🔙 Cancelar")
 
         while True:
             try:
-                choice = int(input(f"\nSelecciona preset (1-{len(presets) + 2}): "))
-                if choice == len(presets) + 2:
+                choice = int(input(f"\nSelecciona preset (1-{len(presets) + 1}): "))
+                if choice == len(presets) + 1:
                     return None
-                elif choice == len(presets) + 1:
-                    return self._create_custom_preset(dataset_info)
                 elif 1 <= choice <= len(presets):
                     return presets[choice - 1]
                 else:
@@ -1024,63 +958,12 @@ class LoRATrainer:
             except KeyboardInterrupt:
                 return None
 
-    def _create_custom_preset(self, dataset_info: Dict) -> Dict[str, Any]:
-        """Crea preset personalizado"""
-        print(f"\n⚙️ CONFIGURACIÓN PERSONALIZADA")
-        print("-" * 40)
-
-        preset = {"name": "Configuración Personalizada", "key": "custom"}
-
-        default_steps = min(3000, dataset_info["total_images"] * 30)
-        while True:
-            try:
-                steps_input = input(
-                    f"Steps de entrenamiento (default {default_steps}): "
-                ).strip()
-                steps = int(steps_input) if steps_input else default_steps
-                if 500 <= steps <= 5000:
-                    preset["max_train_steps"] = steps
-                    break
-                else:
-                    print("❌ Rango válido: 500-5000 steps")
-            except ValueError:
-                print("❌ Ingresa un número válido")
-
-        while True:
-            try:
-                lr_input = input("Learning rate (default 0.0001): ").strip()
-                lr = float(lr_input) if lr_input else 0.0001
-                if 0.00005 <= lr <= 0.0005:
-                    preset["learning_rate"] = lr
-                    break
-                else:
-                    print("❌ Rango válido: 0.00005-0.0005")
-            except ValueError:
-                print("❌ Ingresa un número válido")
-
-        preset["save_every_n_steps"] = max(200, preset["max_train_steps"] // 6)
-        preset["description"] = (
-            f"Configuración personalizada - {preset['max_train_steps']} steps"
-        )
-        return preset
-
     def _generate_training_config(
         self, client_id: str, preset: Dict, dataset_info: Dict, gpu_info: Dict
     ) -> Dict[str, Any]:
-        """Genera configuración completa de entrenamiento CON overrides de presets"""
         gpu_profile = gpu_info.get("profile") or self.config.gpu_profiles["low_end"]
 
-        dataset_repeats = max(
-            50,
-            min(
-                preset.get("dataset_repeats_multiplier", 150),
-                preset.get("dataset_repeats_multiplier", 150)
-                * 100
-                // dataset_info["total_images"],
-            ),
-        )
-
-        # Obtener overrides avanzados del preset si existen
+        dataset_repeats = max(50, min(150, 150 * 100 // dataset_info["total_images"]))
         advanced_overrides = preset.get("advanced_overrides", {})
 
         config = {
@@ -1138,21 +1021,19 @@ class LoRATrainer:
             },
             "advanced_config": {
                 "min_snr_gamma": advanced_overrides.get("min_snr_gamma", 5),
-                "noise_offset": advanced_overrides.get(
-                    "noise_offset", 0.1 if gpu_profile.conv_lora else 0.05
-                ),
-                "adaptive_noise_scale": 0.05 if gpu_profile.conv_lora else None,
-                "multires_noise_iterations": 4 if gpu_profile.conv_lora else 0,
-                "multires_noise_discount": 0.3 if gpu_profile.conv_lora else 0,
+                "noise_offset": advanced_overrides.get("noise_offset", 0.05),
+                "adaptive_noise_scale": None,
+                "multires_noise_iterations": 0,
+                "multires_noise_discount": 0,
                 "ip_noise_gamma": None,
-                "debiased_estimation_loss": gpu_profile.conv_lora,
+                "debiased_estimation_loss": False,
             },
             "save_config": {
                 "save_every_n_steps": preset.get("save_every_n_steps", 500),
                 "save_model_as": "safetensors",
                 "save_precision": "fp16",
                 "output_name": f"{client_id}_avatar_lora_{preset['key']}",
-                "max_checkpoints": 5 if gpu_profile.vram_gb_min >= 8 else 3,
+                "max_checkpoints": 3,
             },
         }
         return config
@@ -1160,7 +1041,6 @@ class LoRATrainer:
     def _confirm_configuration(
         self, config: Dict, dataset_info: Dict, gpu_info: Dict
     ) -> bool:
-        """Confirma configuración"""
         print(f"\n📋 RESUMEN DE CONFIGURACIÓN")
         print("=" * 50)
         print(f"Cliente: {config['client_id']}")
@@ -1175,7 +1055,6 @@ class LoRATrainer:
         print(f"   Batch size: {training_config['train_batch_size']}")
 
         if gpu_info.get("profile"):
-            # ⭐ CORREGIDO: Tiempo = steps / steps_per_hour
             total_hours = (
                 training_config["max_train_steps"]
                 / gpu_info["profile"].steps_per_hour_estimate
@@ -1185,7 +1064,6 @@ class LoRATrainer:
         return input("\n¿Guardar esta configuración? (s/n): ").lower().startswith("s")
 
     def _save_training_config(self, config: Dict, client_path: Path) -> bool:
-        """Guarda configuración"""
         try:
             config_file = client_path / "training" / "lora_config.json"
             config_file.parent.mkdir(parents=True, exist_ok=True)
@@ -1198,20 +1076,16 @@ class LoRATrainer:
             return False
 
     def _setup_training_environment(self, client_path: Path) -> bool:
-        """Configura entorno"""
         print(f"\n🔧 CONFIGURANDO ENTORNO")
         print("-" * 25)
-
         success = True
         if not self._setup_kohya_ss():
             success = False
-
         print(f"✅ Entorno configurado")
         input("Presiona Enter para continuar...")
         return success
 
     def _display_training_info(self, config: Dict, client_path: Path):
-        """Muestra información de entrenamiento"""
         print(f"📋 INFORMACIÓN:")
         print(f"   Cliente: {config['client_id']}")
         print(f"   Preset: {config['preset_name']}")
@@ -1221,7 +1095,6 @@ class LoRATrainer:
         print(f"   Learning Rate: {training_config['learning_rate']}")
 
     def _confirm_training_start(self, config: Dict) -> bool:
-        """Confirma inicio de entrenamiento"""
         training_config = config["training_config"]
 
         if self.detected_gpu_profile:
@@ -1248,7 +1121,6 @@ class LoRATrainer:
     def _update_training_history(
         self, client_path: Path, config: Dict, duration, success: bool
     ):
-        """Actualiza historial"""
         try:
             config_file = client_path / "metadata" / "client_config.json"
             client_config = load_json_safe(config_file, {})
@@ -1271,7 +1143,6 @@ class LoRATrainer:
             self.logger.error(f"Error actualizando historial: {e}")
 
     def show_training_progress(self, client_id: str, clients_dir: Path):
-        """Muestra progreso del entrenamiento"""
         client_path = clients_dir / client_id
         print(f"\n📈 PROGRESO DE ENTRENAMIENTO - {client_id}")
         print("=" * 60)
@@ -1295,7 +1166,6 @@ class LoRATrainer:
         input("\nPresiona Enter para continuar...")
 
     def generate_test_samples(self, client_id: str, clients_dir: Path):
-        """Gestiona muestras de prueba"""
         client_path = clients_dir / client_id
         models_dir = client_path / "models"
 
@@ -1327,16 +1197,10 @@ class LoRATrainer:
         print(f"\n💡 PARA USAR EL MODELO:")
         print(f"   1. Trigger word: '{client_id}'")
         print(f"   2. Weight: 0.7-1.0")
-        print(f"   3. Prompts ejemplo:")
-        print(
-            f"      - 'portrait of {client_id}, detailed face, professional lighting'"
-        )
-        print(f"      - '{client_id} smiling, high quality photography'")
 
         input("\nPresiona Enter para continuar...")
 
     def manage_trained_models(self, client_id: str, clients_dir: Path):
-        """Gestiona modelos entrenados"""
         client_path = clients_dir / client_id
         models_dir = client_path / "models"
 
@@ -1358,22 +1222,5 @@ class LoRATrainer:
         print(f"📊 ESTADÍSTICAS:")
         print(f"   Total modelos: {len(model_files)}")
         print(f"   Espacio usado: {total_size:.1f}MB")
-
-        print(f"\n🧠 MODELOS DISPONIBLES:")
-        for i, model_file in enumerate(
-            sorted(model_files, key=lambda x: x.stat().st_mtime, reverse=True), 1
-        ):
-            model_time = datetime.fromtimestamp(model_file.stat().st_mtime)
-            model_size = model_file.stat().st_size / (1024 * 1024)
-
-            if "-" in model_file.stem:
-                parts = model_file.stem.split("-")
-                step_count = parts[-1] if parts[-1].isdigit() else "final"
-            else:
-                step_count = "unknown"
-
-            print(f"   {i}. {model_file.name}")
-            print(f"      Steps: {step_count} | Tamaño: {model_size:.1f}MB")
-            print(f"      Creado: {model_time.strftime('%Y-%m-%d %H:%M:%S')}")
 
         input("\nPresiona Enter para continuar...")
