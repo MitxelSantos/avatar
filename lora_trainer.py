@@ -554,14 +554,18 @@ class LoRATrainer:
                 "--gradient_checkpointing",
                 "--cache_latents",
                 "--no_half_vae",  # CRÍTICO: evita NaN en latents
-                # ⭐ FLAGS ANTI-NaN ADICIONALES
+                # FLAGS ANTI-NaN ADICIONALES
                 "--max_data_loader_n_workers",
                 "0",  # CRÍTICO: evita multiprocessing
                 "--seed",
                 "42",  # Reproducibilidad
+                "--max_grad_norm",
+                "0.5",  # limitar gradientes más agresivamente
+                "--noise_offset",
+                "0.03",  # estabilizar training (compatible SDXL)
                 "--max_token_length",
                 "225",  # SDXL estándar
-                # ⭐ CAPTION EXTENSION (CRÍTICO)
+                # CAPTION EXTENSION (CRÍTICO)
                 "--caption_extension",
                 ".txt",  # Usar .txt para todos los clientes
                 # Guardado
