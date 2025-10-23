@@ -271,7 +271,7 @@ class AvatarPipelineConfig:
             "gtx1650_quick": {
                 "name": "GTX 1650 - Rápido (3-4 horas)",
                 "max_train_steps": 500,  # Reducido para testing
-                "learning_rate": 0.0001,  # MÁS BAJO - evita NaN
+                "learning_rate": 0.00005,  # MÁS BAJO - evita NaN
                 "dataset_repeats_multiplier": 250,
                 "save_every_n_steps": 125,
                 "description": "Pruebas ultrarrápidas GTX 1650 @ 768x768 (parámetros estables)",
@@ -279,7 +279,7 @@ class AvatarPipelineConfig:
             "gtx1650_balanced": {
                 "name": "GTX 1650 - Equilibrado (6-8 horas)",
                 "max_train_steps": 1000,
-                "learning_rate": 0.0001,  # MÁS BAJO - evita NaN
+                "learning_rate": 0.00005,  # MÁS BAJO - evita NaN
                 "dataset_repeats_multiplier": 200,
                 "save_every_n_steps": 250,
                 "description": "Balance calidad/tiempo GTX 1650 @ 768x768 (estable)",
@@ -287,7 +287,7 @@ class AvatarPipelineConfig:
             "gtx1650_quality": {
                 "name": "GTX 1650 - Alta Calidad (10-12 horas)",
                 "max_train_steps": 1500,
-                "learning_rate": 0.0001,  # AÚN MÁS BAJO para convergencia suave
+                "learning_rate": 0.00005,  # AÚN MÁS BAJO para convergencia suave
                 "dataset_repeats_multiplier": 150,
                 "save_every_n_steps": 300,
                 "description": "Máxima calidad GTX 1650 @ 768x768 (ultra estable)",
@@ -303,7 +303,7 @@ class AvatarPipelineConfig:
             "balanced": {
                 "name": "Entrenamiento Equilibrado",
                 "max_train_steps": 2500,
-                "learning_rate": 0.0001,
+                "learning_rate": 0.00005,
                 "dataset_repeats_multiplier": 150,
                 "save_every_n_steps": 350,
                 "description": "Balance entre calidad y tiempo",

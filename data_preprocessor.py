@@ -1029,7 +1029,7 @@ resolution = 768
 batch_size = 1
 
   [[datasets.subsets]]
-  image_dir = "{dataset_dir.name}"
+  image_dir = "{dataset_dir.as_posix()}" 
   num_repeats = {repeats}
   class_tokens = "{client_id}"
   caption_extension = ".txt"

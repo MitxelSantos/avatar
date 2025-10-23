@@ -516,16 +516,17 @@ class LoRATrainer:
             print(f"   ✅ Pasando subdirectorio DIRECTO a Kohya_ss")
 
             # COMANDO OPTIMIZADO PARA SDXL
+            # 🔥 FIX: Usar dataset_config.toml (método oficial Kohya)
+            toml_config = dataset_dir.parent / "dataset_config.toml"
+
             cmd = [
                 sys.executable,
                 "sdxl_train_network.py",
-                # ⭐⭐⭐ SOLUCIÓN 1: Dataset DIRECTO (donde están las imágenes)
-                "--train_data_dir",
-                dataset_dir.parent.as_posix(),  # ✅ Subdirectorio directo
-                "--resolution",
-                f"{dataset_config['resolution']},{dataset_config['resolution']}",
-                "--train_batch_size",
-                str(training_config["train_batch_size"]),
+                "--dataset_config",
+                toml_config.as_posix(),
+                # Modelo base
+                "--pretrained_model_name_or_path",
+                model_config["pretrained_model_name_or_path"],
                 # Modelo base
                 "--pretrained_model_name_or_path",
                 model_config["pretrained_model_name_or_path"],
