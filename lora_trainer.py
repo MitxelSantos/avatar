@@ -560,6 +560,9 @@ class LoRATrainer:
                 "42",  # Reproducibilidad
                 "--max_token_length",
                 "225",  # SDXL estándar
+                # ⭐ CAPTION EXTENSION (CRÍTICO)
+                "--caption_extension",
+                ".txt",  # Usar .txt para todos los clientes
                 # Guardado
                 "--output_dir",
                 output_dir.as_posix(),
