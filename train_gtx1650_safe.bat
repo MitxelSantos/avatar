@@ -1,6 +1,7 @@
 @echo off
 echo ========================================
 echo ENTRENAMIENTO LORA - GTX 1650 SAFE MODE
+echo FIX: Bucketing habilitado para imágenes de diferentes tamaños
 echo ========================================
 
 cd kohya_ss
@@ -12,6 +13,11 @@ python sdxl_train_network.py ^
   --network_dim 32 ^
   --network_alpha 16 ^
   --resolution "768,768" ^
+  --enable_bucket ^
+  --min_bucket_reso 512 ^
+  --max_bucket_reso 1024 ^
+  --bucket_reso_steps 64 ^
+  --bucket_no_upscale ^
   --train_batch_size 1 ^
   --max_train_steps 500 ^
   --learning_rate 0.0001 ^
@@ -24,7 +30,6 @@ python sdxl_train_network.py ^
   --mixed_precision "fp16" ^
   --gradient_checkpointing ^
   --max_data_loader_n_workers 0 ^
-  --persistent_data_loader_workers ^
   --max_train_epochs 1 ^
   --seed 42 ^
   --caption_extension ".txt" ^
@@ -37,4 +42,8 @@ python sdxl_train_network.py ^
   --logging_dir "../clients/Esoterico/training/logs" ^
   --log_with "tensorboard"
 
+echo.
+echo ========================================
+echo ENTRENAMIENTO COMPLETADO
+echo ========================================
 pause
