@@ -1,8 +1,21 @@
 @echo off
 echo ========================================
-echo ENTRENAMIENTO LORA GTX 1650 - FINAL
-echo Todas las flags compatibles y probadas
+echo ENTRENAMIENTO GTX 1650 - ULTRA OPTIMIZADO
+echo 4GB VRAM - Maxima liberacion de memoria
 echo ========================================
+
+REM Configurar variables de entorno para liberar memoria
+set PYTORCH_CUDA_ALLOC_CONF=max_split_size_mb=128
+set CUDA_LAUNCH_BLOCKING=0
+
+echo.
+echo Verificando VRAM disponible...
+nvidia-smi | findstr "Memory-Usage"
+echo.
+echo Si hay mas de 300MB usado, CANCELA (Ctrl+C)
+echo y ejecuta primero: liberar_vram.bat
+echo.
+pause
 
 cd kohya_ss
 
@@ -40,6 +53,7 @@ python sdxl_train_network.py ^
   --save_precision "fp16" ^
   --min_snr_gamma 5 ^
   --noise_offset 0.03 ^
+  --lowram ^
   --output_dir "../clients/Esoterico/models" ^
   --output_name "Esoterico_gtx1650_v1" ^
   --save_model_as "safetensors" ^
@@ -50,13 +64,6 @@ python sdxl_train_network.py ^
 
 echo.
 echo ========================================
-echo ENTRENAMIENTO COMPLETADO
+echo ENTRENAMIENTO FINALIZADO
 echo ========================================
-echo.
-echo Modelo: ../clients/Esoterico/models/Esoterico_gtx1650_v1.safetensors
-echo Logs: ../clients/Esoterico/training/logs
-echo.
-echo Para monitorear en tiempo real:
-echo tensorboard --logdir ../clients/Esoterico/training/logs
-echo.
 pause
